@@ -1,6 +1,6 @@
 FROM node:18-alpine
 
-# Install git (required to clone pokemon-showdown)
+# Install git
 RUN apk add --no-cache git
 
 # Clone Pokemon Showdown
@@ -13,6 +13,13 @@ RUN npm install
 
 # Copy example config
 RUN cp config/config-example.js config/config.js
+
+# Give bot users voice rank so they can chat in moderated rooms
+RUN echo '{"tailglow1": "+", "tailglow2": "+"}' > config/usergroups.json
+
+# Patch chat.ts to allow unregistered users to chat in battle rooms
+# Changes the check from "user.registered || user.autoconfirmed" to "true"
+RUN sed -i 's/!(user.registered || user.autoconfirmed)/false/g' server/chat.ts
 
 # Expose the default port
 EXPOSE 8000

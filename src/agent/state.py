@@ -20,6 +20,7 @@ class AgentState(TypedDict):
 
     # LLM interaction
     llm_response: str  # Raw LLM output
+    reasoning: Optional[str]  # Extracted reasoning for chat
 
     # Parsed decision
     action_type: Optional[Literal["move", "switch"]]

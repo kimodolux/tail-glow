@@ -43,10 +43,25 @@ def decide_action_node(state: AgentState) -> AgentState:
 
 def parse_decision_node(state: AgentState) -> AgentState:
     """
-    Parse LLM response into structured action.
-    Uses regex to extract action from response.
+    Parse LLM response into structured action and reasoning.
+    Extracts both REASONING and ACTION from response.
     """
     response = state["llm_response"]
+
+    # Extract reasoning
+    reasoning_match = re.search(
+        r"REASONING:\s*(.+?)(?=\nACTION:|$)",
+        response,
+        re.IGNORECASE | re.DOTALL
+    )
+    if reasoning_match:
+        reasoning = reasoning_match.group(1).strip()
+        # Truncate for chat limit (~300 char limit in Showdown)
+        state["reasoning"] = reasoning[:280] if len(reasoning) > 280 else reasoning
+        logger.info(f"Parsed reasoning: {state['reasoning']}")
+    else:
+        state["reasoning"] = None
+        logger.debug("No reasoning found in response")
 
     # Look for "ACTION: [move/switch]"
     match = re.search(r"ACTION:\s*(.+?)(?:\n|$)", response, re.IGNORECASE)

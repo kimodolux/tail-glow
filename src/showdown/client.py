@@ -22,14 +22,15 @@ class TailGlowPlayer(Player):
         self.battles_played = 0
         self.battles_won = 0
 
-    def choose_move(self, battle):
+    async def choose_move(self, battle):
         """
         Called by poke-env when it's our turn.
 
         Flow:
         1. Format battle state
         2. Run through LangGraph agent
-        3. Execute decided action
+        3. Send reasoning as chat message
+        4. Execute decided action
         """
         # Format state
         formatted_state = format_battle_state(battle)
@@ -43,6 +44,7 @@ class TailGlowPlayer(Player):
             "formatted_state": formatted_state,
             "tool_results": {},
             "llm_response": "",
+            "reasoning": None,
             "action_type": None,
             "action_target": None,
             "error": None,
@@ -51,8 +53,27 @@ class TailGlowPlayer(Player):
         # Run agent
         result = self.agent.invoke(initial_state)
 
+        # Send reasoning as chat message before executing move
+        await self._send_reasoning_chat(battle, result)
+
         # Execute action
         return self._execute_action(battle, result)
+
+    async def _send_reasoning_chat(self, battle, result):
+        """Send AI reasoning as a chat message in the battle room."""
+        reasoning = result.get("reasoning")
+
+        if reasoning:
+            try:
+                # Format message with turn context
+                chat_message = f"[T{battle.turn}] {reasoning}"
+                await self.ps_client.send_message(chat_message, battle.battle_tag)
+                logger.debug(f"Sent reasoning chat: {chat_message}")
+            except Exception as e:
+                # Don't fail the move if chat fails
+                logger.warning(f"Failed to send reasoning chat: {e}")
+        else:
+            logger.debug("No reasoning to send")
 
     def _execute_action(self, battle, result):
         """Execute the decided action."""
