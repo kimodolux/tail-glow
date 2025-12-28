@@ -5,6 +5,7 @@ import logging
 import argparse
 
 from src.config import Config
+from src.data import init_randbats_data
 from src.showdown.client import run_battles
 
 
@@ -35,6 +36,17 @@ async def main(n_battles: int = 10):
         logger.info(f"Ollama Model: {Config.OLLAMA_MODEL}")
     else:
         logger.info(f"Anthropic Model: {Config.ANTHROPIC_MODEL}")
+
+    # Fetch and cache randbats data (accessible via get_randbats_data() anywhere)
+    logger.info(f"Fetching randbats data for {Config.BATTLE_FORMAT}...")
+    randbats_data = await init_randbats_data(
+        Config.BATTLE_FORMAT,
+        url_template=Config.RANDBATS_DATA_URL,
+    )
+    if randbats_data:
+        logger.info(f"Loaded randbats data for {len(randbats_data)} Pokemon")
+    else:
+        logger.warning("Failed to fetch randbats data, using fallback estimates")
 
     # Run battles
     await run_battles(n_battles=n_battles)

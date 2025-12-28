@@ -38,9 +38,10 @@ class MatchupResult:
 class DamageCalculator:
     """Calculate damage for battle decisions using poke-env's built-in calculator."""
 
-    def __init__(self, gen: int = 9):
+    def __init__(self, gen: int = 9, randbats_data=None):
         self.gen = gen
         self.gen_data = GenData.from_gen(gen)
+        self.randbats_data = randbats_data
 
     def calculate_our_moves_vs_active(
         self, battle: Battle
@@ -252,7 +253,6 @@ class DamageCalculator:
             return
 
         # Need to estimate stats for opponent Pokemon
-        # Random Battles use fixed spreads: 85 EVs in all stats, 31 IVs
         species_id = pokemon.species.lower().replace("-", "").replace(" ", "")
 
         try:
@@ -268,9 +268,23 @@ class DamageCalculator:
 
             level = pokemon.level or 100
 
-            # Random Battles fixed spread: 85 EVs all stats, 31 IVs, neutral nature
-            evs = [85, 85, 85, 85, 85, 85]  # HP, Atk, Def, SpA, SpD, Spe
-            ivs = [31, 31, 31, 31, 31, 31]
+            # Use randbats data if available, otherwise fall back to estimates
+            if self.randbats_data:
+                randbats_evs = self.randbats_data.get_evs(pokemon.species)
+                randbats_ivs = self.randbats_data.get_ivs(pokemon.species)
+                randbats_level = self.randbats_data.get_level(pokemon.species)
+
+                if randbats_level:
+                    level = randbats_level
+
+                # Convert dict to list format [HP, Atk, Def, SpA, SpD, Spe]
+                stat_order = ["hp", "atk", "def", "spa", "spd", "spe"]
+                evs = [randbats_evs.get(s, 84) for s in stat_order]
+                ivs = [randbats_ivs.get(s, 31) for s in stat_order]
+            else:
+                # Fallback: Random Battles fixed spread estimate
+                evs = [84, 84, 84, 84, 84, 84]  # HP, Atk, Def, SpA, SpD, Spe
+                ivs = [31, 31, 31, 31, 31, 31]
 
             raw_stats = compute_raw_stats(
                 species_id, evs, ivs, level, "hardy", self.gen_data
@@ -318,6 +332,15 @@ class DamageCalculator:
         self, pokemon: Pokemon, existing_count: int
     ) -> List[Tuple[str, bool]]:
         """Estimate most threatening moves for a Pokemon based on its species."""
+        # Try randbats data first for more accurate move prediction
+        if self.randbats_data:
+            possible_moves = self.randbats_data.get_possible_moves(pokemon.species)
+            if possible_moves:
+                return self._score_moves_from_pool(
+                    pokemon, possible_moves, existing_count
+                )
+
+        # Fallback to learnset estimation
         species_id = pokemon.species.lower().replace("-", "").replace(" ", "")
 
         # Get learnset for this Pokemon
@@ -330,14 +353,24 @@ class DamageCalculator:
         if not learnset:
             return []
 
+        return self._score_moves_from_pool(
+            pokemon, set(learnset.keys()), existing_count
+        )
+
+    def _score_moves_from_pool(
+        self, pokemon: Pokemon, move_pool: set, existing_count: int
+    ) -> List[Tuple[str, bool]]:
+        """Score and filter moves from a given move pool."""
         # Get Pokemon's types for STAB consideration
         pokemon_types = [t.name.lower() for t in pokemon.types if t]
 
         # Score moves by threat level
         move_scores: List[Tuple[str, int]] = []
 
-        for move_id in learnset.keys():
-            move_data = self.gen_data.moves.get(move_id, {})
+        for move_id in move_pool:
+            # Normalize move ID to match gen_data format
+            normalized_move = move_id.lower().replace(" ", "").replace("-", "")
+            move_data = self.gen_data.moves.get(normalized_move, {})
             if not move_data:
                 continue
 
@@ -363,7 +396,7 @@ class DamageCalculator:
             if accuracy and accuracy < 100:
                 score = int(score * accuracy / 100)
 
-            move_scores.append((move_id, score))
+            move_scores.append((normalized_move, score))
 
         # Sort by score descending
         move_scores.sort(key=lambda x: x[1], reverse=True)
