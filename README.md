@@ -74,7 +74,7 @@ Run two bots against each other on a local Pokemon Showdown server:
 
 ```bash
 # 1. Start the local Showdown server (requires Docker)
-cd local-showdown-server
+cd infra
 docker compose up -d --build
 
 # 2. Wait a few seconds for server to start, then run battles
@@ -86,8 +86,37 @@ This creates two TailGlow bots that battle each other locally. You can watch bat
 
 To stop the server:
 ```bash
-cd local-showdown-server && docker compose down
+cd infra && docker compose down
 ```
+
+## Features
+
+### Damage Calculator
+
+The bot includes a built-in damage calculator that provides accurate damage predictions for every turn:
+
+- **Your moves vs opponent**: Calculates damage ranges for all available moves against the opponent's active Pokemon and seen bench Pokemon
+- **Opponent's threats to you**: Estimates damage from opponent's known moves (or most threatening moves if unknown) against your active and bench Pokemon
+- **KO probability**: Shows whether moves are guaranteed KOs, have a percentage chance to KO, or won't KO
+- **Random Battles accuracy**: Uses the correct EV/IV spreads for Random Battles (85 EVs all stats, 31 IVs)
+
+The damage calculations are appended to the battle state and visible to the LLM for strategic decision-making.
+
+**Configuration**: Enabled by default. Set `ENABLE_DAMAGE_CALC=false` in `.env` to disable.
+
+### Langfuse Tracing (Optional)
+
+The bot supports [Langfuse](https://langfuse.com/) for LLM observability and tracing via LiteLLM's built-in integration.
+
+To enable tracing, add your Langfuse credentials to `.env`:
+
+```bash
+LANGFUSE_PUBLIC_KEY=pk-...
+LANGFUSE_SECRET_KEY=sk-...
+LANGFUSE_HOST=https://cloud.langfuse.com  # or your self-hosted URL
+```
+
+For local development, the `infra/docker-compose.yml` includes a self-hosted Langfuse instance at `http://localhost:3000`.
 
 ## Architecture
 
@@ -107,15 +136,17 @@ cd local-showdown-server && docker compose down
 ┌─────────────────────────────────────────────────┐
 │       LangGraph Agent (Decision Engine)         │
 │  ┌──────────────────────────────────────────┐   │
-│  │ format_state → decide_action → parse     │   │
+│  │ format_state → damage_calc → decide →    │   │
+│  │ parse_decision                           │   │
 │  └──────────────────────────────────────────┘   │
 └────────────────┬────────────────────────────────┘
                  │
                  ▼
 ┌─────────────────────────────────────────────────┐
-│          LLM Provider                           │
+│        LiteLLM (Unified LLM Interface)          │
 │  - Ollama (local, free)                         │
 │  - Anthropic Claude (cloud)                     │
+│  - Langfuse tracing (optional)                  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -130,6 +161,8 @@ tail-glow/
 │   │   ├── state.py         # AgentState TypedDict
 │   │   ├── prompts.py       # System prompt
 │   │   └── graph.py         # LangGraph workflow
+│   ├── damage_calc/
+│   │   └── calculator.py    # Damage calculator using poke-env
 │   ├── showdown/
 │   │   ├── formatter.py     # Battle state formatter
 │   │   └── client.py        # poke-env Player
@@ -137,9 +170,9 @@ tail-glow/
 │       └── provider.py      # LLM abstraction
 ├── scripts/
 │   └── local_battle.py      # Bot vs bot testing
-├── local-showdown-server/
-│   ├── Dockerfile           # Pokemon Showdown server
-│   └── docker-compose.yml
+├── infra/
+│   ├── showdown.Dockerfile  # Pokemon Showdown server
+│   └── docker-compose.yml   # Showdown + Langfuse
 └── tests/
     └── test_formatter.py    # Unit tests
 ```

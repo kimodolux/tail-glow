@@ -1,0 +1,47 @@
+services:
+  # Pokemon Showdown server for local bot training
+  pokemon-showdown:
+    build:
+      context: .
+      dockerfile: showdown.Dockerfile
+    container_name: pokemon-showdown
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Langfuse v2 for LangGraph tracing and observability
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: langfuse
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      - NEXTAUTH_SECRET=mysecretkey
+      - SALT=mysalt
+      - NEXTAUTH_URL=http://localhost:3000
+      - TELEMETRY_ENABLED=false
+    restart: unless-stopped
+
+  # PostgreSQL for Langfuse
+  langfuse-db:
+    image: postgres:15-alpine
+    container_name: langfuse-db
+    environment:
+      - POSTGRES_USER=langfuse
+      - POSTGRES_PASSWORD=langfuse
+      - POSTGRES_DB=langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  langfuse-db-data:
