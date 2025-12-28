@@ -42,7 +42,7 @@ def _format_pokemon(pokemon: Pokemon, is_opponent: bool = False) -> str:
 def _format_move(move, index: int) -> str:
     """Format a move's information."""
     power = move.base_power if move.base_power > 0 else "-"
-    accuracy = f"{move.accuracy}%" if move.accuracy else "-"
+    accuracy = f"{move.accuracy * 100:.0f}%" if move.accuracy else "-"
     move_type = move.type.name.capitalize()
     category = move.category.name.capitalize()
 

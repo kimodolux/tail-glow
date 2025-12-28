@@ -8,6 +8,7 @@ from langgraph.graph import StateGraph, END
 from .state import AgentState
 from .prompts import SYSTEM_PROMPT, build_user_prompt
 from src.llm import get_llm_provider
+from src.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,61 @@ def format_state_node(state: AgentState) -> AgentState:
     In MVP, formatting happens before graph invocation.
     Could be used to add tool results to formatted state.
     """
+    return state
+
+
+def calculate_damage_node(state: AgentState) -> AgentState:
+    """
+    Calculate damage for all relevant matchups.
+    Adds damage calculations to formatted_state for LLM consumption.
+    """
+    if not Config.ENABLE_DAMAGE_CALC:
+        return state
+
+    battle = state.get("battle_object")
+    if not battle:
+        logger.warning("No battle object in state, skipping damage calc")
+        return state
+
+    try:
+        from src.damage_calc import DamageCalculator, format_damage_calculations
+
+        calculator = DamageCalculator(gen=9)
+
+        # Calculate all matchups
+        our_vs_active = calculator.calculate_our_moves_vs_active(battle)
+        our_vs_bench = calculator.calculate_our_moves_vs_bench(battle)
+        their_vs_us = calculator.calculate_their_moves_vs_us(battle)
+        their_vs_bench = calculator.calculate_their_moves_vs_bench(battle)
+
+        logger.info(
+            f"Damage calc results - our_vs_active: {our_vs_active is not None}, "
+            f"their_vs_us: {their_vs_us is not None}"
+        )
+
+        # Store raw results in tool_results
+        state["tool_results"]["damage_calc"] = {
+            "our_vs_active": our_vs_active,
+            "our_vs_bench": our_vs_bench,
+            "their_vs_us": their_vs_us,
+            "their_vs_bench": their_vs_bench,
+        }
+
+        # Format and append to formatted_state
+        damage_text = format_damage_calculations(
+            our_vs_active, our_vs_bench, their_vs_us, their_vs_bench
+        )
+
+        if damage_text.strip():
+            state["formatted_state"] = state["formatted_state"] + "\n\n" + damage_text
+            logger.info("Damage calculations added to state")
+        else:
+            logger.warning("Damage calculations produced empty output")
+
+    except Exception as e:
+        logger.error(f"Damage calculation failed: {e}", exc_info=True)
+        state["tool_results"]["damage_calc_error"] = str(e)
+
     return state
 
 
@@ -107,12 +163,15 @@ def create_agent() -> StateGraph:
 
     # Add nodes
     workflow.add_node("format_state", format_state_node)
+    workflow.add_node("calculate_damage", calculate_damage_node)
     workflow.add_node("decide_action", decide_action_node)
     workflow.add_node("parse_decision", parse_decision_node)
 
     # Define edges (sequential flow)
+    # format_state -> calculate_damage -> decide_action -> parse_decision -> END
     workflow.set_entry_point("format_state")
-    workflow.add_edge("format_state", "decide_action")
+    workflow.add_edge("format_state", "calculate_damage")
+    workflow.add_edge("calculate_damage", "decide_action")
     workflow.add_edge("decide_action", "parse_decision")
     workflow.add_edge("parse_decision", END)
 

@@ -30,11 +30,16 @@ class Config:
     MAX_TURNS: int = int(os.getenv("MAX_TURNS", "100"))
 
     # Feature Flags (for extensibility)
-    ENABLE_DAMAGE_CALC: bool = os.getenv("ENABLE_DAMAGE_CALC", "false").lower() == "true"
+    ENABLE_DAMAGE_CALC: bool = os.getenv("ENABLE_DAMAGE_CALC", "true").lower() == "true"
     ENABLE_RAG: bool = os.getenv("ENABLE_RAG", "false").lower() == "true"
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+
+    # Langfuse Tracing
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "http://localhost:3000")
 
     @classmethod
     def validate(cls) -> None:

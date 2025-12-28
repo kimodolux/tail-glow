@@ -1,73 +1,69 @@
-"""LLM provider abstraction for Ollama and Anthropic."""
+"""LLM provider using LiteLLM for unified model access."""
 
 import logging
-from abc import ABC, abstractmethod
+import os
 
-import ollama
-import anthropic
+import litellm
+from litellm import completion
 
 from src.config import Config
 
 logger = logging.getLogger(__name__)
 
+# Configure LiteLLM
+litellm.drop_params = True  # Ignore unsupported params per provider
 
-class LLMProvider(ABC):
-    """Abstract LLM interface."""
-
-    @abstractmethod
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate response from LLM."""
-        pass
-
-
-class OllamaProvider(LLMProvider):
-    """Local Ollama LLM provider."""
+class LLMProvider:
+    """Unified LLM provider using LiteLLM."""
 
     def __init__(self):
-        self.client = ollama.Client(host=Config.OLLAMA_BASE_URL)
-        self.model = Config.OLLAMA_MODEL
+        self.model = self._get_model_string()
+        self.callbacks = self._setup_callbacks()
+
+    def _get_model_string(self) -> str:
+        """Get the LiteLLM model string based on config.
+
+        LiteLLM uses prefixes to identify providers:
+        - ollama/model-name for Ollama
+        - anthropic/model-name or just model-name for Anthropic
+        """
+        if Config.LLM_PROVIDER == "ollama":
+            # Set base URL for Ollama
+            litellm.api_base = Config.OLLAMA_BASE_URL
+            return f"ollama/{Config.OLLAMA_MODEL}"
+        elif Config.LLM_PROVIDER == "anthropic":
+            return Config.ANTHROPIC_MODEL
+        else:
+            raise ValueError(f"Unknown LLM provider: {Config.LLM_PROVIDER}")
+
+    def _setup_callbacks(self) -> list:
+        """Set up Langfuse callback for tracing if configured."""
+        callbacks = []
+
+        if Config.LANGFUSE_PUBLIC_KEY and Config.LANGFUSE_SECRET_KEY:
+            callbacks.append("langfuse")
+            logger.info("Langfuse tracing enabled for LLM calls")
+
+        return callbacks
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate response using Ollama."""
-        logger.debug(f"Calling Ollama model: {self.model}")
+        """Generate response from LLM."""
+        logger.debug(f"Calling LiteLLM model: {self.model}")
 
-        response = self.client.chat(
+        response = completion(
             model=self.model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
+            max_tokens=512,
+            success_callback=self.callbacks,
+            failure_callback=self.callbacks,
         )
 
-        return response["message"]["content"]
-
-
-class AnthropicProvider(LLMProvider):
-    """Anthropic Claude LLM provider."""
-
-    def __init__(self):
-        self.client = anthropic.Anthropic(api_key=Config.ANTHROPIC_API_KEY)
-        self.model = Config.ANTHROPIC_MODEL
-
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate response using Claude."""
-        logger.debug(f"Calling Anthropic model: {self.model}")
-
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=256,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-
-        return response.content[0].text
+        return response.choices[0].message.content
 
 
 def get_llm_provider() -> LLMProvider:
-    """Factory function to get LLM provider based on config."""
-    if Config.LLM_PROVIDER == "ollama":
-        return OllamaProvider()
-    elif Config.LLM_PROVIDER == "anthropic":
-        return AnthropicProvider()
-    else:
-        raise ValueError(f"Unknown LLM provider: {Config.LLM_PROVIDER}")
+    """Factory function to get LLM provider."""
+    return LLMProvider()

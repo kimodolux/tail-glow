@@ -50,7 +50,7 @@ class TailGlowPlayer(Player):
             "error": None,
         }
 
-        # Run agent
+        # Run agent (Langfuse tracing handled by LiteLLM in LLM provider)
         result = self.agent.invoke(initial_state)
 
         # Send reasoning as chat message before executing move

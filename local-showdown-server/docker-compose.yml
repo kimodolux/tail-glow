@@ -1,7 +1,0 @@
-services:
-  pokemon-showdown:
-    build: .
-    container_name: pokemon-showdown
-    ports:
-      - "8000:8000"
-    restart: unless-stopped
