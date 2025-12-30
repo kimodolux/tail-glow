@@ -7,9 +7,11 @@ AI-powered Pokemon battle agent using LangGraph. Named after the Pokemon move th
 Tail Glow is an autonomous bot that plays competitive Pokemon Random Battles on [Pokemon Showdown](https://pokemonshowdown.com) by:
 
 1. Connecting to Pokemon Showdown via WebSocket
-2. Processing game state through a LangGraph agent
-3. Using LLM reasoning (Ollama or Claude) to make strategic decisions
-4. Executing moves and switches in real-time
+2. Analyzing team composition on turn 1
+3. Gathering battle intelligence in parallel (damage, speed, types, effects)
+4. Retrieving relevant strategy from RAG system
+5. Analysing the above to choose a move
+6. Executing moves and switches in real-time
 
 ## Quick Start
 
@@ -89,65 +91,118 @@ To stop the server:
 cd infra && docker compose down
 ```
 
+## Architecture
+
+### Multi-Graph System
+
+The bot uses two LangGraph workflows:
+
+**Team Analysis Graph** (Turn 1 only):
+```
+analyze_team [LLM #1] → END
+```
+
+**Battle Graph** (Every turn):
+```
+format_state → fetch_opponent_sets
+                      ↓
+     ┌────────────────┼────────────────┐────────────────┐
+     ↓                ↓                ↓                ↓
+  damage           speed            types           effects   (PARALLEL)
+     ↓                ↓                ↓                ↓
+     └────────────────┼────────────────┴────────────────┘
+                      ↓
+              strategy_rag (RAG)
+                      ↓
+           compile_context [LLM #2]
+                      ↓
+            decide_action [LLM #3]
+                      ↓
+              parse_decision
+```
+
+### LLM Calls Per Turn
+
+| Call | Node | Purpose |
+|------|------|---------|
+| #1 | `analyze_team` | Catalog team roles, strengths, weaknesses (turn 1 only) |
+| #2 | `compile_context` | Synthesize all gathered info into focused analysis |
+| #3 | `decide_action` | Make final move/switch decision |
+
+### Data Gathering Nodes (No LLM)
+
+| Node | Purpose |
+|------|---------|
+| `format_state` | Format battle state for display |
+| `fetch_opponent_sets` | Get possible sets from randbats data |
+| `calculate_damage` | Damage calculations for all moves |
+| `calculate_speed` | Speed comparison + priority analysis |
+| `get_type_matchups` | Offensive/defensive type effectiveness |
+| `get_effects` | Relevant item/ability/move effects |
+| `lookup_strategy` | RAG retrieval from strategy docs |
+
 ## Features
 
 ### Damage Calculator
 
-The bot includes a built-in damage calculator that provides accurate damage predictions for every turn:
+Accurate damage predictions using poke-env's damage calculation:
 
-- **Your moves vs opponent**: Calculates damage ranges for all available moves against the opponent's active Pokemon and seen bench Pokemon
-- **Opponent's threats to you**: Estimates damage from opponent's known moves (or most threatening moves if unknown) against your active and bench Pokemon
-- **KO probability**: Shows whether moves are guaranteed KOs, have a percentage chance to KO, or won't KO
-- **Random Battles accuracy**: Uses the correct EV/IV spreads for Random Battles (85 EVs all stats, 31 IVs)
+- Your moves vs opponent (active + bench)
+- Opponent's threats to you
+- KO probability analysis
+- Random Battles accuracy (85 EVs, 31 IVs)
 
-The damage calculations are appended to the battle state and visible to the LLM for strategic decision-making.
+### Speed Calculator
 
-**Configuration**: Enabled by default. Set `ENABLE_DAMAGE_CALC=false` in `.env` to disable.
+Determines turn order with support for:
+
+- Base speed comparison
+- Speed modifiers (paralysis, Choice Scarf, Tailwind, Trick Room)
+- Stat boosts
+- Priority move detection
+
+### Type Matchup Analysis
+
+Uses poke-env's built-in type chart:
+
+- Offensive matchups (your moves vs them)
+- Defensive matchups (their STAB vs you)
+- 4x weakness/immunity detection
+
+### Effects Database
+
+Curated competitive item/ability effects:
+
+- Choice items, Life Orb, Focus Sash
+- Intimidate, Levitate, Magic Guard
+- Priority moves, weather, terrain
+
+### RAG Strategy System
+
+ChromaDB-powered retrieval for strategy documents:
+
+- Index markdown files from `docs/strategy/`
+- Query by Pokemon matchup
+- Include relevant tips in LLM context
+
+To add strategy documents:
+```bash
+mkdir -p docs/strategy/pokemon
+# Create markdown files following POKEMON_TEMPLATE.md
+```
+
+### Battle Chat
+
+The bot sends its reasoning as chat messages during battles, showing its thought process each turn.
 
 ### Langfuse Tracing (Optional)
 
-The bot supports [Langfuse](https://langfuse.com/) for LLM observability and tracing via LiteLLM's built-in integration.
-
-To enable tracing, add your Langfuse credentials to `.env`:
+LLM observability via LiteLLM integration:
 
 ```bash
 LANGFUSE_PUBLIC_KEY=pk-...
 LANGFUSE_SECRET_KEY=sk-...
-LANGFUSE_HOST=https://cloud.langfuse.com  # or your self-hosted URL
-```
-
-For local development, the `infra/docker-compose.yml` includes a self-hosted Langfuse instance at `http://localhost:3000`.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────┐
-│   Pokemon Showdown Server (WebSocket)           │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│         Showdown Client (poke-env)              │
-│  - WebSocket connection                         │
-│  - Battle state tracking                        │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│       LangGraph Agent (Decision Engine)         │
-│  ┌──────────────────────────────────────────┐   │
-│  │ format_state → damage_calc → decide →    │   │
-│  │ parse_decision                           │   │
-│  └──────────────────────────────────────────┘   │
-└────────────────┬────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────┐
-│        LiteLLM (Unified LLM Interface)          │
-│  - Ollama (local, free)                         │
-│  - Anthropic Claude (cloud)                     │
-│  - Langfuse tracing (optional)                  │
-└─────────────────────────────────────────────────┘
+LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
 ## Project Structure
@@ -155,26 +210,63 @@ For local development, the `infra/docker-compose.yml` includes a self-hosted Lan
 ```
 tail-glow/
 ├── src/
-│   ├── config.py            # Configuration management
-│   ├── main.py              # Entry point
+│   ├── config.py              # Configuration management
+│   ├── main.py                # Entry point
+│   │
 │   ├── agent/
-│   │   ├── state.py         # AgentState TypedDict
-│   │   ├── prompts.py       # System prompt
-│   │   └── graph.py         # LangGraph workflow
+│   │   ├── graph.py           # LangGraph workflows (battle + team analysis)
+│   │   ├── state.py           # AgentState TypedDict
+│   │   ├── prompts.py         # Legacy prompts (backward compat)
+│   │   ├── nodes/             # Individual graph nodes
+│   │   │   ├── team_analysis.py   # LLM Call #1
+│   │   │   ├── compile.py         # LLM Call #2
+│   │   │   ├── decide.py          # LLM Call #3
+│   │   │   ├── damage.py
+│   │   │   ├── speed.py
+│   │   │   ├── types.py
+│   │   │   ├── effects.py
+│   │   │   ├── fetch_sets.py
+│   │   │   ├── strategy_rag.py
+│   │   │   ├── format_state.py
+│   │   │   └── parse.py
+│   │   └── prompts/           # Prompt templates
+│   │       ├── team_analysis.py
+│   │       ├── compile.py
+│   │       └── decision.py
+│   │
 │   ├── damage_calc/
-│   │   └── calculator.py    # Damage calculator using poke-env
+│   │   └── calculator.py      # Damage calculations
+│   │
+│   ├── speed/
+│   │   └── calculator.py      # Speed comparison logic
+│   │
+│   ├── data/
+│   │   ├── randbats.py        # Random battles set data
+│   │   └── effects.py         # Curated competitive effects
+│   │
+│   ├── rag/
+│   │   ├── store.py           # ChromaDB vector store
+│   │   └── retriever.py       # Strategy retrieval
+│   │
 │   ├── showdown/
-│   │   ├── formatter.py     # Battle state formatter
-│   │   └── client.py        # poke-env Player
+│   │   ├── client.py          # poke-env Player + turn logic
+│   │   └── formatter.py       # Battle state formatter
+│   │
 │   └── llm/
-│       └── provider.py      # LLM abstraction
+│       └── provider.py        # LiteLLM abstraction
+│
+├── docs/
+│   └── strategy/              # RAG strategy documents (user-created)
+│
 ├── scripts/
-│   └── local_battle.py      # Bot vs bot testing
+│   └── local_battle.py        # Bot vs bot testing
+│
 ├── infra/
-│   ├── showdown.Dockerfile  # Pokemon Showdown server
-│   └── docker-compose.yml   # Showdown + Langfuse
+│   ├── showdown.Dockerfile
+│   └── docker-compose.yml
+│
+├── POKEMON_TEMPLATE.md        # Template for strategy docs
 └── tests/
-    └── test_formatter.py    # Unit tests
 ```
 
 ## Development
