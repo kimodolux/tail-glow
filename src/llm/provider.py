@@ -46,9 +46,20 @@ class LLMProvider:
 
         return callbacks
 
-    def generate(self, system_prompt: str, user_prompt: str) -> str:
-        """Generate response from LLM."""
+    def generate(self, system_prompt: str, user_prompt: str, user: str | None = None) -> str:
+        """Generate response from LLM.
+
+        Args:
+            system_prompt: The system prompt for the LLM
+            user_prompt: The user prompt for the LLM
+            user: Optional user identifier for Langfuse tracking (e.g., TailGlow1, TailGlow2)
+        """
         logger.debug(f"Calling LiteLLM model: {self.model}")
+
+        # Build metadata for Langfuse tracing
+        metadata = {}
+        if user:
+            metadata["trace_user_id"] = user
 
         response = completion(
             model=self.model,
@@ -59,6 +70,7 @@ class LLMProvider:
             max_tokens=512,
             success_callback=self.callbacks,
             failure_callback=self.callbacks,
+            metadata=metadata if metadata else None,
         )
 
         return response.choices[0].message.content

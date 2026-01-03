@@ -16,6 +16,10 @@ def setup_logging():
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     )
 
+    # Quiet noisy libraries
+    logging.getLogger("websockets").setLevel(logging.WARNING)
+    logging.getLogger("poke_env").setLevel(logging.WARNING)
+
 
 async def main(n_battles: int = 10):
     """Main entry point."""
@@ -24,20 +28,14 @@ async def main(n_battles: int = 10):
 
     logger.info("Starting Tail Glow MVP...")
 
-    # Validate config
+    # Set config from environment
     try:
         Config.validate()
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
         return
 
-    logger.info(f"LLM Provider: {Config.LLM_PROVIDER}")
-    if Config.LLM_PROVIDER == "ollama":
-        logger.info(f"Ollama Model: {Config.OLLAMA_MODEL}")
-    else:
-        logger.info(f"Anthropic Model: {Config.ANTHROPIC_MODEL}")
-
-    # Fetch and cache randbats data (accessible via get_randbats_data() anywhere)
+    # Fetch and cache randbats data
     logger.info(f"Fetching randbats data for {Config.BATTLE_FORMAT}...")
     randbats_data = await init_randbats_data(
         Config.BATTLE_FORMAT,
@@ -46,7 +44,7 @@ async def main(n_battles: int = 10):
     if randbats_data:
         logger.info(f"Loaded randbats data for {len(randbats_data)} Pokemon")
     else:
-        logger.warning("Failed to fetch randbats data, using fallback estimates")
+        logger.warning("Failed to fetch randbats data")
 
     # Run battles
     await run_battles(n_battles=n_battles)

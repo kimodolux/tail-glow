@@ -1,179 +1,107 @@
-"""LangGraph agent for Pokemon battle decisions."""
+"""LangGraph agent for Pokemon battle decisions.
 
-import re
+Architecture:
+- Team Analysis Graph: Runs on turn 1 only (LLM Call #1)
+- Main Battle Graph: Runs every turn with parallel information gathering
+  - Sequential: format_state → fetch_sets
+  - Parallel: damage, speed, types, effects (fan-out)
+  - Sequential: strategy_rag → compile (LLM #2) → decide (LLM #3) → parse
+"""
+
 import logging
 
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, START, END
 
 from .state import AgentState
-from .prompts import SYSTEM_PROMPT, build_user_prompt
-from src.llm import get_llm_provider
-from src.config import Config
+from .nodes import (
+    format_state_node,
+    calculate_damage_node,
+    decide_action_node,
+    parse_decision_node,
+    fetch_opponent_sets_node,
+    calculate_speed_node,
+    get_type_matchups_node,
+    get_effects_node,
+    lookup_strategy_node,
+    analyze_team_node,
+    compile_context_node,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def format_state_node(state: AgentState) -> AgentState:
+def create_team_analysis_graph() -> StateGraph:
+    """Build the team analysis graph (runs on turn 1 only).
+
+    This graph performs LLM Call #1 to analyze our team's roles,
+    strengths, and weaknesses.
     """
-    Pass-through node for future extensibility.
-    In MVP, formatting happens before graph invocation.
-    Could be used to add tool results to formatted state.
-    """
-    return state
-
-
-def calculate_damage_node(state: AgentState) -> AgentState:
-    """
-    Calculate damage for all relevant matchups.
-    Adds damage calculations to formatted_state for LLM consumption.
-    """
-    if not Config.ENABLE_DAMAGE_CALC:
-        return state
-
-    battle = state.get("battle_object")
-    if not battle:
-        logger.warning("No battle object in state, skipping damage calc")
-        return state
-
-    try:
-        from src.damage_calc import DamageCalculator, format_damage_calculations
-        from src.data import get_randbats_data
-
-        calculator = DamageCalculator(gen=9, randbats_data=get_randbats_data())
-
-        # Calculate all matchups
-        our_vs_active = calculator.calculate_our_moves_vs_active(battle)
-        our_vs_bench = calculator.calculate_our_moves_vs_bench(battle)
-        their_vs_us = calculator.calculate_their_moves_vs_us(battle)
-        their_vs_bench = calculator.calculate_their_moves_vs_bench(battle)
-
-        logger.info(
-            f"Damage calc results - our_vs_active: {our_vs_active is not None}, "
-            f"their_vs_us: {their_vs_us is not None}"
-        )
-
-        # Store raw results in tool_results
-        state["tool_results"]["damage_calc"] = {
-            "our_vs_active": our_vs_active,
-            "our_vs_bench": our_vs_bench,
-            "their_vs_us": their_vs_us,
-            "their_vs_bench": their_vs_bench,
-        }
-
-        # Format and append to formatted_state
-        damage_text = format_damage_calculations(
-            our_vs_active, our_vs_bench, their_vs_us, their_vs_bench
-        )
-
-        if damage_text.strip():
-            state["formatted_state"] = state["formatted_state"] + "\n\n" + damage_text
-            logger.info("Damage calculations added to state")
-        else:
-            logger.warning("Damage calculations produced empty output")
-
-    except Exception as e:
-        logger.error(f"Damage calculation failed: {e}", exc_info=True)
-        state["tool_results"]["damage_calc_error"] = str(e)
-
-    return state
-
-
-def decide_action_node(state: AgentState) -> AgentState:
-    """
-    Call LLM to decide action.
-    Handles errors gracefully with fallback.
-    """
-    llm = get_llm_provider()
-    user_prompt = build_user_prompt(state["formatted_state"])
-
-    try:
-        response = llm.generate(SYSTEM_PROMPT, user_prompt)
-        state["llm_response"] = response
-        logger.debug(f"LLM response: {response}")
-    except Exception as e:
-        logger.error(f"LLM error: {e}")
-        state["error"] = f"LLM error: {e}"
-        state["llm_response"] = "ACTION: Struggle"  # Fallback
-
-    return state
-
-
-def parse_decision_node(state: AgentState) -> AgentState:
-    """
-    Parse LLM response into structured action and reasoning.
-    Extracts both REASONING and ACTION from response.
-    """
-    response = state["llm_response"]
-
-    # Extract reasoning
-    reasoning_match = re.search(
-        r"REASONING:\s*(.+?)(?=\nACTION:|$)",
-        response,
-        re.IGNORECASE | re.DOTALL
-    )
-    if reasoning_match:
-        reasoning = reasoning_match.group(1).strip()
-        # Truncate for chat limit (~300 char limit in Showdown)
-        state["reasoning"] = reasoning[:280] if len(reasoning) > 280 else reasoning
-        logger.info(f"Parsed reasoning: {state['reasoning']}")
-    else:
-        state["reasoning"] = None
-        logger.debug("No reasoning found in response")
-
-    # Look for "ACTION: [move/switch]"
-    match = re.search(r"ACTION:\s*(.+?)(?:\n|$)", response, re.IGNORECASE)
-
-    if match:
-        action_text = match.group(1).strip()
-        logger.info(f"Parsed action: {action_text}")
-
-        if "switch" in action_text.lower():
-            state["action_type"] = "switch"
-            # Extract Pokemon name after "switch to"
-            pokemon_match = re.search(r"switch to\s+(.+)", action_text, re.IGNORECASE)
-            if pokemon_match:
-                state["action_target"] = pokemon_match.group(1).strip().lower()
-            else:
-                # Try to get anything after "switch"
-                pokemon_match = re.search(r"switch\s+(.+)", action_text, re.IGNORECASE)
-                state["action_target"] = (
-                    pokemon_match.group(1).strip().lower() if pokemon_match else None
-                )
-        else:
-            state["action_type"] = "move"
-            # Clean up move name: remove extra text, normalize
-            move_name = action_text.lower()
-            # Remove common extra text
-            move_name = re.sub(r"\s*\(.*\)", "", move_name)  # Remove parenthetical text
-            move_name = re.sub(r"\s*-.*$", "", move_name)  # Remove text after dash
-            move_name = move_name.strip()
-            state["action_target"] = move_name
-    else:
-        logger.warning(f"Could not parse LLM response: {response}")
-        state["error"] = "Could not parse response"
-        state["action_type"] = "move"
-        state["action_target"] = None  # Will trigger fallback in client
-
-    return state
-
-
-def create_agent() -> StateGraph:
-    """Build the LangGraph state machine."""
-
     workflow = StateGraph(AgentState)
 
-    # Add nodes
+    workflow.add_node("analyze_team", analyze_team_node)
+
+    workflow.add_edge(START, "analyze_team")
+    workflow.add_edge("analyze_team", END)
+
+    return workflow.compile()
+
+
+def create_battle_graph() -> StateGraph:
+    """Build the main battle decision graph (runs every turn).
+
+    Flow:
+    1. format_state - Format battle state for display/context
+    2. fetch_opponent_sets - Get randbats data for opponent Pokemon
+    3. PARALLEL: damage, speed, types, effects - Information gathering
+    4. strategy_rag - Retrieve strategy documents
+    5. compile_context - LLM Call #2: Synthesize all info
+    6. decide_action - LLM Call #3: Make final decision
+    7. parse_decision - Extract action from LLM response
+    """
+    workflow = StateGraph(AgentState)
+
+    # Add all nodes
     workflow.add_node("format_state", format_state_node)
+    workflow.add_node("fetch_opponent_sets", fetch_opponent_sets_node)
     workflow.add_node("calculate_damage", calculate_damage_node)
+    workflow.add_node("calculate_speed", calculate_speed_node)
+    workflow.add_node("get_type_matchups", get_type_matchups_node)
+    workflow.add_node("get_effects", get_effects_node)
+    workflow.add_node("lookup_strategy", lookup_strategy_node)
+    workflow.add_node("compile_context", compile_context_node)
     workflow.add_node("decide_action", decide_action_node)
     workflow.add_node("parse_decision", parse_decision_node)
 
-    # Define edges (sequential flow)
-    # format_state -> calculate_damage -> decide_action -> parse_decision -> END
-    workflow.set_entry_point("format_state")
-    workflow.add_edge("format_state", "calculate_damage")
-    workflow.add_edge("calculate_damage", "decide_action")
+    # Sequential start
+    workflow.add_edge(START, "format_state")
+    workflow.add_edge("format_state", "fetch_opponent_sets")
+
+    # Parallel fan-out from fetch_opponent_sets
+    workflow.add_edge("fetch_opponent_sets", "calculate_damage")
+    workflow.add_edge("fetch_opponent_sets", "calculate_speed")
+    workflow.add_edge("fetch_opponent_sets", "get_type_matchups")
+    workflow.add_edge("fetch_opponent_sets", "get_effects")
+
+    # Fan-in to lookup_strategy (waits for all parallel nodes)
+    workflow.add_edge("calculate_damage", "lookup_strategy")
+    workflow.add_edge("calculate_speed", "lookup_strategy")
+    workflow.add_edge("get_type_matchups", "lookup_strategy")
+    workflow.add_edge("get_effects", "lookup_strategy")
+
+    # Continue sequential
+    workflow.add_edge("lookup_strategy", "compile_context")
+    workflow.add_edge("compile_context", "decide_action")
     workflow.add_edge("decide_action", "parse_decision")
     workflow.add_edge("parse_decision", END)
 
     return workflow.compile()
+
+
+def create_agent() -> StateGraph:
+    """Build the LangGraph state machine.
+
+    Returns the main battle graph for backward compatibility.
+    Use create_battle_graph() and create_team_analysis_graph()
+    directly for the new multi-graph architecture.
+    """
+    return create_battle_graph()

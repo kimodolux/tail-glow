@@ -6,6 +6,8 @@ from poke_env import Player, AccountConfiguration, ServerConfiguration, Showdown
 
 from src.config import Config
 from src.agent import create_agent
+from src.agent.graph import create_team_analysis_graph, create_battle_graph
+from src.data import get_randbats_data, init_randbats_data
 from .formatter import format_battle_state
 
 logger = logging.getLogger(__name__)
@@ -14,30 +16,128 @@ logger = logging.getLogger(__name__)
 class TailGlowPlayer(Player):
     """
     Custom poke-env player using LangGraph agent.
+
+    Architecture:
+    - Turn 1: Run team analysis graph (LLM Call #1) to catalog team roles
+    - Every turn: Run battle graph with parallel info gathering + 2 LLM calls
     """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Create both graphs
+        self.team_analysis_graph = create_team_analysis_graph()
+        self.battle_graph = create_battle_graph()
+        # Legacy single graph for backward compat
         self.agent = create_agent()
+
+        # Battle context storage (persists team analysis across turns)
+        self.battle_context: dict[str, dict] = {}
+
+        # Stats
         self.battles_played = 0
         self.battles_won = 0
+
+        # Randbats data initialization flag
+        self._randbats_initialized = False
+
+        # Quiet the poke-env logger for this player (uses username as logger name)
+        logging.getLogger(self.username).setLevel(logging.WARNING)
 
     async def choose_move(self, battle):
         """
         Called by poke-env when it's our turn.
 
         Flow:
-        1. Format battle state
-        2. Run through LangGraph agent
+        1. Turn 1: Run team analysis (LLM Call #1)
+        2. Every turn: Run battle graph with parallel nodes + LLM Calls #2 & #3
         3. Send reasoning as chat message
         4. Execute decided action
         """
+        # Initialize randbats data on first use (lazy loading)
+        if not self._randbats_initialized:
+            self._randbats_initialized = True
+            if not get_randbats_data():
+                logger.info("Initializing randbats data...")
+                await init_randbats_data(Config.BATTLE_FORMAT)
+
+        # Initialize battle context if this is a new battle
+        if battle.battle_tag not in self.battle_context:
+            self.battle_context[battle.battle_tag] = {
+                "team_analysis": None,
+            }
+
+        # Turn 1: Run team analysis first
+        if battle.turn == 1:
+            await self._run_team_analysis(battle)
+
         # Format state
         formatted_state = format_battle_state(battle)
         logger.debug(f"Formatted state:\n{formatted_state}")
 
-        # Build initial state
-        initial_state = {
+        # Build initial state with all new fields
+        initial_state = self._build_battle_state(battle, formatted_state)
+
+        # Run main battle graph
+        result = self.battle_graph.invoke(initial_state)
+
+        # Send reasoning as chat message before executing move
+        await self._send_reasoning_chat(battle, result)
+
+        # Execute action
+        return self._execute_action(battle, result)
+
+    async def _run_team_analysis(self, battle):
+        """Run team analysis graph on turn 1."""
+        logger.info(f"Running team analysis for battle {battle.battle_tag}")
+
+        # Build minimal state for team analysis
+        analysis_state = {
+            "username": self.username,
+            "battle_tag": battle.battle_tag,
+            "battle_object": battle,
+            "turn": battle.turn,
+            "formatted_state": "",
+            "tool_results": {},
+            "llm_response": "",
+            "reasoning": None,
+            "action_type": None,
+            "action_target": None,
+            "error": None,
+            "team_analysis": None,
+            "opponent_sets": {},
+            "damage_calculations": None,
+            "damage_calc_raw": None,
+            "speed_analysis": None,
+            "speed_calc_raw": None,
+            "type_matchups": None,
+            "effects_analysis": None,
+            "strategy_context": None,
+            "compiled_analysis": None,
+        }
+
+        try:
+            result = self.team_analysis_graph.invoke(analysis_state)
+            team_analysis = result.get("team_analysis")
+
+            if team_analysis:
+                self.battle_context[battle.battle_tag]["team_analysis"] = team_analysis
+                logger.info("Team analysis completed successfully")
+                logger.debug(f"Team analysis:\n{team_analysis}")
+            else:
+                logger.warning("Team analysis returned empty result")
+
+        except Exception as e:
+            logger.error(f"Team analysis failed: {e}", exc_info=True)
+
+    def _build_battle_state(self, battle, formatted_state: str) -> dict:
+        """Build the complete battle state dictionary."""
+        # Get persisted team analysis
+        team_analysis = self.battle_context.get(battle.battle_tag, {}).get("team_analysis")
+
+        return {
+            # Player context
+            "username": self.username,
+            # Core battle info
             "battle_tag": battle.battle_tag,
             "battle_object": battle,
             "turn": battle.turn,
@@ -48,16 +148,20 @@ class TailGlowPlayer(Player):
             "action_type": None,
             "action_target": None,
             "error": None,
+            # Team analysis (from turn 1)
+            "team_analysis": team_analysis,
+            # Parallel node outputs (will be populated by graph)
+            "opponent_sets": {},
+            "damage_calculations": None,
+            "damage_calc_raw": None,
+            "speed_analysis": None,
+            "speed_calc_raw": None,
+            "type_matchups": None,
+            "effects_analysis": None,
+            "strategy_context": None,
+            # Compiled context (will be populated by compile node)
+            "compiled_analysis": None,
         }
-
-        # Run agent (Langfuse tracing handled by LiteLLM in LLM provider)
-        result = self.agent.invoke(initial_state)
-
-        # Send reasoning as chat message before executing move
-        await self._send_reasoning_chat(battle, result)
-
-        # Execute action
-        return self._execute_action(battle, result)
 
     async def _send_reasoning_chat(self, battle, result):
         """Send AI reasoning as a chat message in the battle room."""
@@ -149,6 +253,10 @@ class TailGlowPlayer(Player):
             f"Battle {battle.battle_tag} ended: {result} "
             f"(Record: {self.battles_won}/{self.battles_played}, Win rate: {win_rate:.1f}%)"
         )
+
+        # Clean up battle context
+        if battle.battle_tag in self.battle_context:
+            del self.battle_context[battle.battle_tag]
 
 
 async def run_battles(n_battles: int = 1):
