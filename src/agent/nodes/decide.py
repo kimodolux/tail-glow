@@ -1,46 +1,70 @@
-"""Decision node - LLM Call #2 (Every turn).
+"""Decision node - LLM Call (Every turn).
 
-Makes the final move/switch decision based on all gathered battle information.
+Makes the final move/switch decision based on pre-analyzed summaries.
 """
 
 import logging
+from typing import Any
 
-from ..state import AgentState
-from ..prompts import DECISION_SYSTEM_PROMPT, build_decision_prompt
+from src.agent.state import AgentState
+from src.agent.prompts import DECISION_SYSTEM_PROMPT, build_decision_prompt
 from src.llm import get_llm_provider
 
 logger = logging.getLogger(__name__)
 
 
-def decide_action_node(state: AgentState) -> AgentState:
-    """
-    Call LLM to decide action based on all gathered battle information.
-    This is LLM Call #2 - uses all parallel node outputs directly.
+def decide_action_node(state: AgentState) -> dict[str, Any]:
+    """Call LLM to decide action based on pre-analyzed battle information.
+
+    Uses summaries from:
+    - expected_opponent_action
+    - best_moves
+    - best_switches
+    - speed_analysis
+    - battle_analysis
+    - battle_strategy
     """
     battle = state.get("battle_object")
 
-    # Gather all parallel node outputs
+    # Get pre-analyzed summaries
     formatted_state = state.get("formatted_state", "Unknown battle state")
-    damage_calculations = state.get("damage_calculations")
-    speed_analysis = state.get("speed_analysis")
-    type_matchups = state.get("type_matchups")
-    effects_analysis = state.get("effects_analysis")
-    strategy_context = state.get("strategy_context")
-    team_analysis = state.get("team_analysis")
+
+    # Speed summary
+    speed_summary = _extract_speed_summary(state)
+
+    # Expected opponent action
+    expected_action = state.get("expected_opponent_action", {})
+    expected_opponent_summary = expected_action.get("summary", "Unable to predict") if expected_action else "Unable to predict"
+
+    # Best moves
+    best_moves = state.get("best_moves", {})
+    best_moves_summary = best_moves.get("summary", "No analysis") if best_moves else "No analysis"
+    best_moves_list = _format_moves_list(best_moves)
+
+    # Best switches
+    best_switches = state.get("best_switches", {})
+    best_switches_summary = best_switches.get("summary", "No analysis") if best_switches else "No analysis"
+    best_switches_list = _format_switches_list(best_switches)
+
+    # Battle context and strategy
+    battle_context = state.get("battle_analysis", "")
+    battle_strategy = state.get("battle_strategy", "")
 
     # Format available options
     available_moves = _format_available_moves(battle)
     available_switches = _format_available_switches(battle)
 
-    # Build decision prompt with all context
+    # Build decision prompt with summaries
     user_prompt = build_decision_prompt(
         formatted_state=formatted_state,
-        damage_calculations=damage_calculations,
-        speed_analysis=speed_analysis,
-        type_matchups=type_matchups,
-        effects_analysis=effects_analysis,
-        strategy_context=strategy_context,
-        team_analysis=team_analysis,
+        speed_summary=speed_summary,
+        expected_opponent_summary=expected_opponent_summary,
+        best_moves_summary=best_moves_summary,
+        best_moves_list=best_moves_list,
+        best_switches_summary=best_switches_summary,
+        best_switches_list=best_switches_list,
+        battle_context=battle_context,
+        battle_strategy=battle_strategy,
         available_moves=available_moves,
         available_switches=available_switches,
     )
@@ -49,15 +73,83 @@ def decide_action_node(state: AgentState) -> AgentState:
         llm = get_llm_provider()
         username = state.get("username")
         response = llm.generate(DECISION_SYSTEM_PROMPT, user_prompt, user=username)
-        state["llm_response"] = response
         logger.debug(f"Decision response: {response}")
+        return {"llm_response": response}
     except Exception as e:
         logger.error(f"Decision LLM error: {e}")
-        state["error"] = f"Decision error: {e}"
-        # Fallback to first available move
-        state["llm_response"] = _create_fallback_response(battle)
+        fallback = _create_fallback_response(battle)
+        return {"llm_response": fallback, "error": f"Decision error: {e}"}
 
-    return state
+
+def _extract_speed_summary(state: AgentState) -> str:
+    """Extract a simple speed summary from speed analysis."""
+    speed_raw = state.get("speed_calc_raw", {})
+    speed_analysis = state.get("speed_analysis", "")
+
+    if speed_raw:
+        we_outspeed = speed_raw.get("we_outspeed", False)
+        our_speed = speed_raw.get("our_speed", "?")
+        their_speed = speed_raw.get("their_speed", "?")
+
+        if we_outspeed:
+            return f"You outspeed ({our_speed} vs {their_speed}). You move first."
+        else:
+            return f"They outspeed ({their_speed} vs {our_speed}). They move first."
+
+    # Fallback to formatted analysis
+    if speed_analysis:
+        # Extract the verdict line
+        if "YOU OUTSPEED" in speed_analysis:
+            return "You outspeed. You move first."
+        elif "THEY OUTSPEED" in speed_analysis:
+            return "They outspeed. They move first."
+
+    return "Speed comparison unknown."
+
+
+def _format_moves_list(best_moves: dict) -> str:
+    """Format the ranked moves list."""
+    if not best_moves:
+        return ""
+
+    moves = best_moves.get("moves", [])
+    if not moves:
+        return ""
+
+    lines = ["**Ranked:**"]
+    for move_data in moves[:4]:
+        move_name = move_data["move"].replace("-", " ").title()
+        rank = move_data.get("rank", "?")
+        damage = move_data.get("damage_to_active", "?")
+        reasoning = move_data.get("reasoning", "")
+
+        lines.append(f"{rank}. {move_name}: {damage}")
+        if reasoning:
+            lines.append(f"   ({reasoning})")
+
+    return "\n".join(lines)
+
+
+def _format_switches_list(best_switches: dict) -> str:
+    """Format the ranked switches list."""
+    if not best_switches:
+        return ""
+
+    switches = best_switches.get("switches", [])
+    if not switches:
+        return ""
+
+    lines = ["**Ranked:**"]
+    for switch_data in switches[:4]:
+        name = switch_data["pokemon"].replace("-", " ").title()
+        rank = switch_data.get("rank", "?")
+        survives = switch_data.get("survives", False)
+        matchup = switch_data.get("matchup_result", "?")
+
+        survive_str = "survives" if survives else "DIES"
+        lines.append(f"{rank}. {name} ({survive_str}): {matchup}")
+
+    return "\n".join(lines)
 
 
 def _format_available_moves(battle) -> str:

@@ -44,3 +44,24 @@ class AgentState(TypedDict):
     type_matchups: Optional[str]  # Offensive/defensive matchups
     effects_analysis: Optional[str]  # Relevant item/ability/move effects
     strategy_context: Optional[str]  # RAG retrieval results
+
+    # --- Battle strategy (Turn 1) ---
+    battle_strategy: Optional[str]  # Initial game plan from create_battle_strategy
+
+    # --- Matchup calculator (background) ---
+    matchup_results: Optional[dict[tuple[str, str], dict[str, Any]]]  # Pokemon pair outcomes
+
+    # --- Expected opponent action ---
+    expected_opponent_action: Optional[dict[str, Any]]  # Predicted move/switch with probabilities
+
+    # --- Best options analysis ---
+    best_moves: Optional[dict[str, Any]]  # Ranked move options with reasoning
+    best_switches: Optional[dict[str, Any]]  # Ranked switch options with reasoning
+
+    # --- Tera analysis ---
+    tera_analysis: Optional[dict[str, Any]]  # Tera tracking and recommendations
+
+    # --- Battle memory ---
+    battle_log: Optional[str]  # Turn-by-turn history
+    battle_analysis: Optional[str]  # Strategic analysis updated each turn
+    revealed_sets: Optional[dict[str, dict[str, Any]]]  # Tracked opponent information
