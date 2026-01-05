@@ -44,6 +44,3 @@ class AgentState(TypedDict):
     type_matchups: Optional[str]  # Offensive/defensive matchups
     effects_analysis: Optional[str]  # Relevant item/ability/move effects
     strategy_context: Optional[str]  # RAG retrieval results
-
-    # --- Compiled context ---
-    compiled_analysis: Optional[str]  # Synthesized battle analysis

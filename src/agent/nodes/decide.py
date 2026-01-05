@@ -1,6 +1,6 @@
-"""Decision node - LLM Call #3 (Every turn).
+"""Decision node - LLM Call #2 (Every turn).
 
-Makes the final move/switch decision based on compiled analysis.
+Makes the final move/switch decision based on all gathered battle information.
 """
 
 import logging
@@ -14,19 +14,33 @@ logger = logging.getLogger(__name__)
 
 def decide_action_node(state: AgentState) -> AgentState:
     """
-    Call LLM to decide action based on compiled analysis.
-    This is LLM Call #3 - uses the synthesized analysis from compile node.
+    Call LLM to decide action based on all gathered battle information.
+    This is LLM Call #2 - uses all parallel node outputs directly.
     """
     battle = state.get("battle_object")
-    compiled_analysis = state.get("compiled_analysis")
+
+    # Gather all parallel node outputs
+    formatted_state = state.get("formatted_state", "Unknown battle state")
+    damage_calculations = state.get("damage_calculations")
+    speed_analysis = state.get("speed_analysis")
+    type_matchups = state.get("type_matchups")
+    effects_analysis = state.get("effects_analysis")
+    strategy_context = state.get("strategy_context")
+    team_analysis = state.get("team_analysis")
 
     # Format available options
     available_moves = _format_available_moves(battle)
     available_switches = _format_available_switches(battle)
 
-    # Build decision prompt
+    # Build decision prompt with all context
     user_prompt = build_decision_prompt(
-        compiled_analysis=compiled_analysis or "No analysis available.",
+        formatted_state=formatted_state,
+        damage_calculations=damage_calculations,
+        speed_analysis=speed_analysis,
+        type_matchups=type_matchups,
+        effects_analysis=effects_analysis,
+        strategy_context=strategy_context,
+        team_analysis=team_analysis,
         available_moves=available_moves,
         available_switches=available_switches,
     )

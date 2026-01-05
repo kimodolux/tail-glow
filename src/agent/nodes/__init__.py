@@ -10,7 +10,6 @@ from .type_matchups import get_type_matchups_node
 from .effects import get_effects_node
 from .strategy_rag import lookup_strategy_node
 from .team_analysis import analyze_team_node
-from .compile import compile_context_node
 
 __all__ = [
     "format_state_node",
@@ -23,5 +22,4 @@ __all__ = [
     "get_effects_node",
     "lookup_strategy_node",
     "analyze_team_node",
-    "compile_context_node",
 ]

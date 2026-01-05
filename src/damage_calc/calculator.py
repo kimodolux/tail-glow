@@ -279,11 +279,11 @@ class DamageCalculator:
 
                 # Convert dict to list format [HP, Atk, Def, SpA, SpD, Spe]
                 stat_order = ["hp", "atk", "def", "spa", "spd", "spe"]
-                evs = [randbats_evs.get(s, 84) for s in stat_order]
-                ivs = [randbats_ivs.get(s, 31) for s in stat_order]
+                evs = [randbats_evs[s] for s in stat_order]
+                ivs = [randbats_ivs[s] for s in stat_order]
             else:
                 # Fallback: Random Battles fixed spread estimate
-                evs = [84, 84, 84, 84, 84, 84]  # HP, Atk, Def, SpA, SpD, Spe
+                evs = [85, 85, 85, 85, 85, 85]  # HP, Atk, Def, SpA, SpD, Spe
                 ivs = [31, 31, 31, 31, 31, 31]
 
             raw_stats = compute_raw_stats(
@@ -300,8 +300,8 @@ class DamageCalculator:
                 "spe": raw_stats[5],
             }
 
-            # Also set max_hp if not set
-            if pokemon.max_hp is None:
+            # Also set max_hp if not set (default is 0, not None)
+            if pokemon.max_hp == 0:
                 pokemon._max_hp = raw_stats[0]
 
         except Exception as e:

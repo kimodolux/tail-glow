@@ -5,7 +5,7 @@ Architecture:
 - Main Battle Graph: Runs every turn with parallel information gathering
   - Sequential: format_state → fetch_sets
   - Parallel: damage, speed, types, effects (fan-out)
-  - Sequential: strategy_rag → compile (LLM #2) → decide (LLM #3) → parse
+  - Sequential: strategy_rag → decide (LLM #2) → parse
 """
 
 import logging
@@ -24,7 +24,6 @@ from .nodes import (
     get_effects_node,
     lookup_strategy_node,
     analyze_team_node,
-    compile_context_node,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,9 +53,8 @@ def create_battle_graph() -> StateGraph:
     2. fetch_opponent_sets - Get randbats data for opponent Pokemon
     3. PARALLEL: damage, speed, types, effects - Information gathering
     4. strategy_rag - Retrieve strategy documents
-    5. compile_context - LLM Call #2: Synthesize all info
-    6. decide_action - LLM Call #3: Make final decision
-    7. parse_decision - Extract action from LLM response
+    5. decide_action - LLM Call #2: Make final decision
+    6. parse_decision - Extract action from LLM response
     """
     workflow = StateGraph(AgentState)
 
@@ -68,7 +66,6 @@ def create_battle_graph() -> StateGraph:
     workflow.add_node("get_type_matchups", get_type_matchups_node)
     workflow.add_node("get_effects", get_effects_node)
     workflow.add_node("lookup_strategy", lookup_strategy_node)
-    workflow.add_node("compile_context", compile_context_node)
     workflow.add_node("decide_action", decide_action_node)
     workflow.add_node("parse_decision", parse_decision_node)
 
@@ -89,8 +86,7 @@ def create_battle_graph() -> StateGraph:
     workflow.add_edge("get_effects", "lookup_strategy")
 
     # Continue sequential
-    workflow.add_edge("lookup_strategy", "compile_context")
-    workflow.add_edge("compile_context", "decide_action")
+    workflow.add_edge("lookup_strategy", "decide_action")
     workflow.add_edge("decide_action", "parse_decision")
     workflow.add_edge("parse_decision", END)
 

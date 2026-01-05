@@ -112,7 +112,6 @@ class TailGlowPlayer(Player):
             "type_matchups": None,
             "effects_analysis": None,
             "strategy_context": None,
-            "compiled_analysis": None,
         }
 
         try:
@@ -159,8 +158,6 @@ class TailGlowPlayer(Player):
             "type_matchups": None,
             "effects_analysis": None,
             "strategy_context": None,
-            # Compiled context (will be populated by compile node)
-            "compiled_analysis": None,
         }
 
     async def _send_reasoning_chat(self, battle, result):

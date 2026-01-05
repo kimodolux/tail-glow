@@ -114,9 +114,7 @@ format_state → fetch_opponent_sets
                       ↓
               strategy_rag (RAG)
                       ↓
-           compile_context [LLM #2]
-                      ↓
-            decide_action [LLM #3]
+            decide_action [LLM #2]
                       ↓
               parse_decision
 ```
@@ -126,8 +124,7 @@ format_state → fetch_opponent_sets
 | Call | Node | Purpose |
 |------|------|---------|
 | #1 | `analyze_team` | Catalog team roles, strengths, weaknesses (turn 1 only) |
-| #2 | `compile_context` | Synthesize all gathered info into focused analysis |
-| #3 | `decide_action` | Make final move/switch decision |
+| #2 | `decide_action` | Make final move/switch decision using all gathered info |
 
 ### Data Gathering Nodes (No LLM)
 
@@ -219,8 +216,7 @@ tail-glow/
 │   │   ├── prompts.py         # Legacy prompts (backward compat)
 │   │   ├── nodes/             # Individual graph nodes
 │   │   │   ├── team_analysis.py   # LLM Call #1
-│   │   │   ├── compile.py         # LLM Call #2
-│   │   │   ├── decide.py          # LLM Call #3
+│   │   │   ├── decide.py          # LLM Call #2
 │   │   │   ├── damage.py
 │   │   │   ├── speed.py
 │   │   │   ├── types.py
@@ -231,7 +227,6 @@ tail-glow/
 │   │   │   └── parse.py
 │   │   └── prompts/           # Prompt templates
 │   │       ├── team_analysis.py
-│   │       ├── compile.py
 │   │       └── decision.py
 │   │
 │   ├── damage_calc/
