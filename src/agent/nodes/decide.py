@@ -48,7 +48,18 @@ def decide_action_node(state: AgentState) -> AgentState:
     try:
         llm = get_llm_provider()
         username = state.get("username")
-        response = llm.generate(DECISION_SYSTEM_PROMPT, user_prompt, user=username)
+        trace_id = state.get("trace_id")
+        turn = state.get("turn")
+        battle_tag = state.get("battle_tag")
+        response = llm.generate(
+            DECISION_SYSTEM_PROMPT,
+            user_prompt,
+            user=username,
+            trace_id=trace_id,
+            generation_name="decide_action",
+            turn=turn,
+            battle_tag=battle_tag,
+        )
         state["llm_response"] = response
         logger.debug(f"Decision response: {response}")
     except Exception as e:

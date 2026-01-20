@@ -31,8 +31,19 @@ def analyze_team_node(state: AgentState) -> AgentState:
         llm = get_llm_provider()
         user_prompt = build_team_analysis_prompt(team_info)
         username = state.get("username")
+        trace_id = state.get("trace_id")
+        turn = state.get("turn")
+        battle_tag = state.get("battle_tag")
 
-        response = llm.generate(TEAM_ANALYSIS_SYSTEM_PROMPT, user_prompt, user=username)
+        response = llm.generate(
+            TEAM_ANALYSIS_SYSTEM_PROMPT,
+            user_prompt,
+            user=username,
+            trace_id=trace_id,
+            generation_name="team_analysis",
+            turn=turn,
+            battle_tag=battle_tag,
+        )
 
         state["team_analysis"] = response.strip()
         logger.info("Team analysis completed successfully")

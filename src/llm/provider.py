@@ -46,20 +46,47 @@ class LLMProvider:
 
         return callbacks
 
-    def generate(self, system_prompt: str, user_prompt: str, user: str | None = None) -> str:
+    def generate(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        user: str | None = None,
+        trace_id: str | None = None,
+        generation_name: str | None = None,
+        turn: int | None = None,
+        battle_tag: str | None = None,
+    ) -> str:
         """Generate response from LLM.
 
         Args:
             system_prompt: The system prompt for the LLM
             user_prompt: The user prompt for the LLM
             user: Optional user identifier for Langfuse tracking (e.g., TailGlow1, TailGlow2)
+            trace_id: Optional parent trace ID for nesting this call under a Langfuse trace
+            generation_name: Optional name for this generation in Langfuse (e.g., "team_analysis", "decide_action")
+            turn: Optional turn number for Langfuse tagging
+            battle_tag: Optional battle tag for Langfuse session tracking
         """
         logger.debug(f"Calling LiteLLM model: {self.model}")
 
         # Build metadata for Langfuse tracing
         metadata = {}
+        tags = []
+
         if user:
             metadata["trace_user_id"] = user
+        if trace_id:
+            metadata["trace_id"] = trace_id
+        if generation_name:
+            metadata["generation_name"] = generation_name
+        if battle_tag:
+            metadata["session_id"] = battle_tag
+        if turn is not None:
+            metadata["turn"] = turn
+            tags.append(f"turn:{turn}")
+
+        if tags:
+            metadata["tags"] = tags
 
         response = completion(
             model=self.model,

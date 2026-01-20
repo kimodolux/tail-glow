@@ -1,6 +1,7 @@
 """Pokemon Showdown client using poke-env."""
 
 import logging
+import uuid
 
 from poke_env import Player, AccountConfiguration, ServerConfiguration, ShowdownServerConfiguration
 
@@ -90,6 +91,9 @@ class TailGlowPlayer(Player):
         """Run team analysis graph on turn 1."""
         logger.info(f"Running team analysis for battle {battle.battle_tag}")
 
+        # Create a trace ID for this team analysis graph execution
+        trace_id = str(uuid.uuid4())
+
         # Build minimal state for team analysis
         analysis_state = {
             "username": self.username,
@@ -103,6 +107,7 @@ class TailGlowPlayer(Player):
             "action_type": None,
             "action_target": None,
             "error": None,
+            "trace_id": trace_id,
             "team_analysis": None,
             "opponent_sets": {},
             "damage_calculations": None,
@@ -133,6 +138,9 @@ class TailGlowPlayer(Player):
         # Get persisted team analysis
         team_analysis = self.battle_context.get(battle.battle_tag, {}).get("team_analysis")
 
+        # Create a trace ID for this battle turn graph execution
+        trace_id = str(uuid.uuid4())
+
         return {
             # Player context
             "username": self.username,
@@ -147,6 +155,8 @@ class TailGlowPlayer(Player):
             "action_type": None,
             "action_target": None,
             "error": None,
+            # Langfuse tracing
+            "trace_id": trace_id,
             # Team analysis (from turn 1)
             "team_analysis": team_analysis,
             # Parallel node outputs (will be populated by graph)

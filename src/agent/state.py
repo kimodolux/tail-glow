@@ -32,6 +32,9 @@ class AgentState(TypedDict):
     # Error handling
     error: Optional[str]  # Error message if any
 
+    # Langfuse tracing
+    trace_id: Optional[str]  # Parent trace ID for nesting LLM calls
+
     # --- Team analysis ---
     team_analysis: Optional[str]  # LLM analysis of our team roles (Turn 1)
 
