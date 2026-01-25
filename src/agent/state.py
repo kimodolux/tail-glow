@@ -2,6 +2,8 @@
 
 from typing import TypedDict, Optional, Literal, Any
 
+from src.battle import TeamsState
+
 
 class AgentState(TypedDict):
     """State for LangGraph agent - designed for extensibility."""
@@ -13,6 +15,9 @@ class AgentState(TypedDict):
     battle_tag: str  # Unique battle ID
     battle_object: Optional[Any]  # Reference to poke-env Battle
     turn: int  # Current turn number
+
+    # Team state tracking (persists across turns)
+    teams_state: Optional[TeamsState]  # Cached stats and revealed info for both teams
 
     # Formatted state for LLM
     formatted_state: str  # Human-readable game state

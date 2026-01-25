@@ -25,7 +25,12 @@ def calculate_damage_node(state: AgentState) -> dict:
         from src.damage_calc import DamageCalculator, format_damage_calculations
         from src.data import get_randbats_data
 
-        calculator = DamageCalculator(gen=9, randbats_data=get_randbats_data())
+        teams_state = state.get("teams_state")
+        calculator = DamageCalculator(
+            gen=9,
+            randbats_data=get_randbats_data(),
+            teams_state=teams_state,
+        )
 
         # Calculate all matchups
         our_vs_active = calculator.calculate_our_moves_vs_active(battle)

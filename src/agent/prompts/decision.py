@@ -16,10 +16,11 @@ If your active Pokemon is "None (must switch)" or no moves are available:
 
 ### Forced Switch Selection
 When your Pokemon has fainted and you must switch in:
-1. Identify what beats the opponent's active Pokemon (type advantage, favorable stats)
-2. Consider entry hazard damage on your side (Stealth Rock, Spikes, etc.)
-3. Pick the Pokemon that best handles their current threat while preserving your win condition
-4. Prefer Pokemon that can threaten a KO or force them out
+1. This is a free switch - the opponent does NOT get to move this "turn". Your switch-in will come in safely without taking damage (except hazards).
+2. Identify what beats the opponent's active Pokemon (type advantage, favorable stats)
+3. Consider entry hazard damage on your side (Stealth Rock, Spikes, etc.)
+4. Pick the Pokemon that best handles their current threat while preserving your win condition
+5. Prefer Pokemon that can threaten a KO or force them out
 
 ---
 

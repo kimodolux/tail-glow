@@ -70,17 +70,45 @@ class RandbatsData:
         return species.lower().replace("-", "").replace(" ", "").replace(".", "")
 
     def get_pokemon(self, species: str) -> Optional[RandbatsPokemon]:
-        """Get Pokemon data by species name."""
+        """Get Pokemon data by species name.
+
+        Handles forme variants by falling back to base species if the full
+        forme name isn't found (e.g., "Tatsugiri-Curly" -> "Tatsugiri").
+        """
         normalized = self._normalize_species(species)
         original = self._normalized_lookup.get(normalized)
         if original:
+            logger.debug(f"Randbats lookup: '{species}' -> '{original}' (exact match)")
             return self._data.get(original)
+
+        # Try base species without forme suffix
+        if "-" in species:
+            base_species = species.split("-")[0]
+            normalized_base = self._normalize_species(base_species)
+            original_base = self._normalized_lookup.get(normalized_base)
+            if original_base:
+                logger.info(f"Randbats lookup: '{species}' -> '{original_base}' (forme fallback)")
+                return self._data.get(original_base)
+
+        # Try prefix matching for already-normalized names (e.g., "tatsugiricurly")
+        # where the dash was already stripped during normalization
+        for lookup_normalized, lookup_original in self._normalized_lookup.items():
+            # Check if normalized name starts with a known base species
+            if normalized.startswith(lookup_normalized) and len(normalized) > len(lookup_normalized):
+                logger.info(f"Randbats lookup: '{species}' -> '{lookup_original}' (prefix match)")
+                return self._data.get(lookup_original)
+
+        logger.warning(f"#### UNEXPECTED: Randbats lookup failed for '{species}' (normalized: '{normalized}') ####")
         return None
 
     def get_level(self, species: str) -> Optional[int]:
         """Get the randbats level for a Pokemon."""
         pokemon = self.get_pokemon(species)
-        return pokemon.level if pokemon else None
+        if pokemon:
+            logger.debug(f"Randbats level for '{species}': {pokemon.level}")
+            return pokemon.level
+        logger.warning(f"#### UNEXPECTED: No randbats level for '{species}', will use fallback ####")
+        return None
 
     def get_evs(self, species: str) -> Dict[str, int]:
         """Get EVs for a Pokemon, defaulting unspecified stats to 84.
@@ -90,45 +118,57 @@ class RandbatsData:
         """
         pokemon = self.get_pokemon(species)
         if not pokemon:
+            logger.warning(f"#### UNEXPECTED: No randbats EVs for '{species}', using default 84s ####")
             return {"hp": 84, "atk": 84, "def": 84, "spa": 84, "spd": 84, "spe": 84}
 
         base_evs = {"hp": 84, "atk": 84, "def": 84, "spa": 84, "spd": 84, "spe": 84}
         if pokemon.evs:
             base_evs.update(pokemon.evs)
+            logger.debug(f"Randbats EVs for '{species}': custom spread {pokemon.evs}")
         return base_evs
 
     def get_ivs(self, species: str) -> Dict[str, int]:
         """Get IVs for a Pokemon, defaulting unspecified stats to 31."""
         pokemon = self.get_pokemon(species)
         if not pokemon:
+            logger.warning(f"#### UNEXPECTED: No randbats IVs for '{species}', using default 31s ####")
             return {"hp": 31, "atk": 31, "def": 31, "spa": 31, "spd": 31, "spe": 31}
 
         base_ivs = {"hp": 31, "atk": 31, "def": 31, "spa": 31, "spd": 31, "spe": 31}
         if pokemon.ivs:
             base_ivs.update(pokemon.ivs)
+            logger.debug(f"Randbats IVs for '{species}': custom spread {pokemon.ivs}")
         return base_ivs
 
     def get_possible_moves(self, species: str) -> Set[str]:
         """Get all possible moves across all roles for a Pokemon."""
         pokemon = self.get_pokemon(species)
         if not pokemon:
+            logger.warning(f"#### UNEXPECTED: No randbats moves for '{species}' ####")
             return set()
 
         moves: Set[str] = set()
         for role in pokemon.roles.values():
             for move in role.moves:
                 moves.add(self._normalize_move(move))
+        logger.debug(f"Randbats moves for '{species}': {len(moves)} possible moves")
         return moves
 
     def get_possible_abilities(self, species: str) -> List[str]:
         """Get all possible abilities for a Pokemon."""
         pokemon = self.get_pokemon(species)
-        return pokemon.abilities if pokemon else []
+        if not pokemon:
+            logger.warning(f"#### UNEXPECTED: No randbats abilities for '{species}' ####")
+            return []
+        return pokemon.abilities
 
     def get_possible_items(self, species: str) -> List[str]:
         """Get all possible items for a Pokemon."""
         pokemon = self.get_pokemon(species)
-        return pokemon.items if pokemon else []
+        if not pokemon:
+            logger.warning(f"#### UNEXPECTED: No randbats items for '{species}' ####")
+            return []
+        return pokemon.items
 
     def _normalize_move(self, move: str) -> str:
         """Normalize move name to match poke-env format."""

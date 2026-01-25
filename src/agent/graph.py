@@ -3,9 +3,12 @@
 Architecture:
 - Team Analysis Graph: Runs on turn 1 only (LLM Call #1)
 - Main Battle Graph: Runs every turn with parallel information gathering
-  - Sequential: format_state → fetch_sets
+  - Sequential: format_state → update_teams_state → fetch_sets
   - Parallel: damage, speed, types, effects (fan-out)
   - Sequential: strategy_rag → decide (LLM #2) → parse
+
+The update_teams_state node maintains cached stats and revealed information
+for both teams across turns, avoiding redundant calculations.
 """
 
 import logging
@@ -24,6 +27,7 @@ from .nodes import (
     get_effects_node,
     lookup_strategy_node,
     analyze_team_node,
+    update_teams_state_node,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +64,7 @@ def create_battle_graph() -> StateGraph:
 
     # Add all nodes
     workflow.add_node("format_state", format_state_node)
+    workflow.add_node("update_teams_state", update_teams_state_node)
     workflow.add_node("fetch_opponent_sets", fetch_opponent_sets_node)
     workflow.add_node("calculate_damage", calculate_damage_node)
     workflow.add_node("calculate_speed", calculate_speed_node)
@@ -69,9 +74,10 @@ def create_battle_graph() -> StateGraph:
     workflow.add_node("decide_action", decide_action_node)
     workflow.add_node("parse_decision", parse_decision_node)
 
-    # Sequential start
+    # Sequential start: format_state → update_teams_state → fetch_opponent_sets
     workflow.add_edge(START, "format_state")
-    workflow.add_edge("format_state", "fetch_opponent_sets")
+    workflow.add_edge("format_state", "update_teams_state")
+    workflow.add_edge("update_teams_state", "fetch_opponent_sets")
 
     # Parallel fan-out from fetch_opponent_sets
     workflow.add_edge("fetch_opponent_sets", "calculate_damage")
