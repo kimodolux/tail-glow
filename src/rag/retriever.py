@@ -1,4 +1,10 @@
-"""Strategy retriever - queries the vector store for relevant strategy documents."""
+"""Strategy retriever - queries the vector store for relevant strategy documents.
+
+Supports retrieving:
+- Static strategy documentation
+- Learned matchup outcomes from past battles
+- Learned mistakes to avoid
+"""
 
 import logging
 from typing import Optional
@@ -9,7 +15,13 @@ logger = logging.getLogger(__name__)
 
 
 class StrategyRetriever:
-    """Retrieves relevant strategy documents for battle decisions."""
+    """Retrieves relevant strategy documents and learnings for battle decisions.
+
+    Queries three sources:
+    - strategy_docs: Static strategy documentation
+    - matchup_learnings: Learned Pokemon matchup outcomes
+    - mistake_learnings: Learned mistakes to avoid
+    """
 
     def __init__(self, k: int = 3):
         """Initialize the retriever.
@@ -34,13 +46,24 @@ class StrategyRetriever:
         self,
         our_pokemon: str,
         their_pokemon: str,
+        our_role: Optional[str] = None,
+        their_role: Optional[str] = None,
+        format: str = "gen9randombattle",
         team_context: Optional[str] = None,
     ) -> list[str]:
-        """Retrieve strategy documents relevant to the current matchup.
+        """Retrieve strategy documents and learnings relevant to the current matchup.
+
+        Queries multiple sources:
+        1. Learned matchup outcomes (most specific)
+        2. Learned mistakes in similar situations
+        3. Static strategy documents
 
         Args:
             our_pokemon: Our active Pokemon species
             their_pokemon: Opponent's active Pokemon species
+            our_role: Our Pokemon's role (e.g., "special_attacker")
+            their_role: Opponent's apparent role
+            format: Battle format for filtering
             team_context: Optional team analysis for context
 
         Returns:
@@ -50,30 +73,115 @@ class StrategyRetriever:
         if not store:
             return []
 
-        # Build multiple queries for comprehensive retrieval
+        all_results = []
+        seen_texts = set()
+
+        # 1. Query learned matchups (most valuable)
+        try:
+            matchup_results = store.query_matchups(
+                pokemon=our_pokemon.lower(),
+                opponent=their_pokemon.lower(),
+                role=our_role,
+                format=format,
+                k=self.k,
+            )
+            for r in matchup_results:
+                doc = r.get("document", "")
+                if doc and hash(doc[:100]) not in seen_texts:
+                    seen_texts.add(hash(doc[:100]))
+                    all_results.append(f"[Learned Matchup] {doc}")
+        except Exception as e:
+            logger.warning(f"Matchup query failed: {e}")
+
+        # 2. Query learned mistakes for similar situations
+        try:
+            situation = f"{our_pokemon} vs {their_pokemon}"
+            mistake_results = store.query_mistakes(
+                situation=situation,
+                pokemon=our_pokemon.lower(),
+                k=2,
+            )
+            for r in mistake_results:
+                doc = r.get("document", "")
+                if doc and hash(doc[:100]) not in seen_texts:
+                    seen_texts.add(hash(doc[:100]))
+                    all_results.append(f"[Learned Mistake] {doc}")
+        except Exception as e:
+            logger.warning(f"Mistake query failed: {e}")
+
+        # 3. Query static strategy docs
         queries = [
             f"{our_pokemon} strategy",
             f"how to beat {their_pokemon}",
             f"{our_pokemon} vs {their_pokemon}",
-            f"dealing with {their_pokemon}",
         ]
-
-        all_results = []
-        seen_texts = set()
 
         for query in queries:
             try:
                 results = store.query(query, k=2)
                 for result in results:
-                    # Deduplicate by text content
-                    text_hash = hash(result[:100])  # Hash first 100 chars
+                    text_hash = hash(result[:100])
                     if text_hash not in seen_texts:
                         seen_texts.add(text_hash)
-                        all_results.append(result)
+                        all_results.append(f"[Strategy Doc] {result}")
             except Exception as e:
-                logger.warning(f"Query failed for '{query}': {e}")
+                logger.warning(f"Strategy query failed for '{query}': {e}")
 
         # Limit total results
+        return all_results[:self.k * 3]
+
+    def retrieve_for_situation(
+        self,
+        situation_description: str,
+        our_pokemon: Optional[str] = None,
+        opponent: Optional[str] = None,
+    ) -> list[str]:
+        """Retrieve learnings relevant to a specific situation.
+
+        Useful for querying by situation type (e.g., "facing setup sweeper",
+        "endgame with hazards") rather than specific matchup.
+
+        Args:
+            situation_description: Description of the situation
+            our_pokemon: Our Pokemon (optional filter)
+            opponent: Opponent Pokemon (optional filter)
+
+        Returns:
+            List of relevant learnings
+        """
+        store = self._ensure_store()
+        if not store:
+            return []
+
+        all_results = []
+        seen_texts = set()
+
+        # Query mistakes for this situation
+        try:
+            mistake_results = store.query_mistakes(
+                situation=situation_description,
+                pokemon=our_pokemon.lower() if our_pokemon else None,
+                k=self.k,
+            )
+            for r in mistake_results:
+                doc = r.get("document", "")
+                if doc and hash(doc[:100]) not in seen_texts:
+                    seen_texts.add(hash(doc[:100]))
+                    all_results.append(doc)
+        except Exception as e:
+            logger.warning(f"Situation query failed: {e}")
+
+        # Also query general strategy docs
+        try:
+            results = store.query(situation_description, k=self.k)
+            for result in results:
+                text_hash = hash(result[:100])
+                if text_hash not in seen_texts:
+                    seen_texts.add(text_hash)
+                    all_results.append(result)
+        except Exception as e:
+            logger.warning(f"General situation query failed: {e}")
+
         return all_results[:self.k * 2]
 
     def retrieve_general(self, query: str) -> list[str]:
@@ -114,8 +222,8 @@ def format_strategy_context(results: list[str]) -> str:
     for i, result in enumerate(results, 1):
         # Trim whitespace and limit length
         text = result.strip()
-        if len(text) > 300:
-            text = text[:297] + "..."
+        if len(text) > 400:
+            text = text[:397] + "..."
 
         lines.append(f"**Note {i}:**")
         lines.append(text)

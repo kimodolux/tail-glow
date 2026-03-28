@@ -2,12 +2,12 @@
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from poke_env.battle import Battle, Move, Pokemon, PokemonType
+from poke_env.battle import Battle, Move, Pokemon
 from poke_env.calc import calculate_damage
 from poke_env.data import GenData
-from poke_env.stats import compute_raw_stats, STATS_TO_IDX
+from poke_env.stats import compute_raw_stats
 
 if TYPE_CHECKING:
     from src.battle import TeamsState

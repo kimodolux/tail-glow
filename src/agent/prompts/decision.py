@@ -66,6 +66,9 @@ DECISION_USER_PROMPT = """Based on this battle information, choose your action.
 ## Current Situation
 {formatted_state}
 
+## Current Strategy Analysis
+{strategy_analysis}
+
 {damage_calculations}
 
 {speed_analysis}
@@ -73,8 +76,6 @@ DECISION_USER_PROMPT = """Based on this battle information, choose your action.
 {type_matchups}
 
 {effects_analysis}
-
-{strategy_context}
 
 ## Our Team Analysis
 {team_analysis}
@@ -100,7 +101,7 @@ def build_decision_prompt(
     speed_analysis: str | None,
     type_matchups: str | None,
     effects_analysis: str | None,
-    strategy_context: str | None,
+    strategy_analysis: str | None,
     team_analysis: str | None,
     available_moves: str,
     available_switches: str,
@@ -113,7 +114,7 @@ def build_decision_prompt(
         speed_analysis: Formatted speed analysis
         type_matchups: Formatted type matchup info
         effects_analysis: Formatted effects info
-        strategy_context: Retrieved strategy documents
+        strategy_analysis: LLM analysis of battle progress
         team_analysis: Team role analysis from turn 1
         available_moves: List of available moves
         available_switches: List of available switches
@@ -127,7 +128,7 @@ def build_decision_prompt(
         speed_analysis=speed_analysis or "No speed analysis available",
         type_matchups=type_matchups or "No type matchups available",
         effects_analysis=effects_analysis or "No effects analysis available",
-        strategy_context=strategy_context or "No strategy notes available",
+        strategy_analysis=strategy_analysis or "No strategy analysis available",
         team_analysis=team_analysis or "No team analysis available",
         available_moves=available_moves or "None available",
         available_switches=available_switches or "None available",

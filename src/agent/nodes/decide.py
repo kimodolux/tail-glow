@@ -1,6 +1,7 @@
-"""Decision node - LLM Call #2 (Every turn).
+"""Decision node - LLM Call #3 (Every turn).
 
-Makes the final move/switch decision based on all gathered battle information.
+Makes the final move/switch decision based on all gathered battle information
+and the strategy analysis from the previous node.
 """
 
 import logging
@@ -15,17 +16,17 @@ logger = logging.getLogger(__name__)
 def decide_action_node(state: AgentState) -> AgentState:
     """
     Call LLM to decide action based on all gathered battle information.
-    This is LLM Call #2 - uses all parallel node outputs directly.
+    This is LLM Call #3 - uses parallel node outputs and strategy analysis.
     """
     battle = state.get("battle_object")
 
-    # Gather all parallel node outputs
+    # Gather all node outputs
     formatted_state = state.get("formatted_state", "Unknown battle state")
     damage_calculations = state.get("damage_calculations")
     speed_analysis = state.get("speed_analysis")
     type_matchups = state.get("type_matchups")
     effects_analysis = state.get("effects_analysis")
-    strategy_context = state.get("strategy_context")
+    strategy_analysis = state.get("strategy_analysis")
     team_analysis = state.get("team_analysis")
 
     # Format available options
@@ -39,7 +40,7 @@ def decide_action_node(state: AgentState) -> AgentState:
         speed_analysis=speed_analysis,
         type_matchups=type_matchups,
         effects_analysis=effects_analysis,
-        strategy_context=strategy_context,
+        strategy_analysis=strategy_analysis,
         team_analysis=team_analysis,
         available_moves=available_moves,
         available_switches=available_switches,

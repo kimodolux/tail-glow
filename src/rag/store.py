@@ -1,22 +1,37 @@
-"""ChromaDB vector store for strategy document retrieval.
+"""ChromaDB vector store for strategy document retrieval and self-learning.
 
-Supports both reading (querying) and writing (adding learnings) for
-future bot self-improvement capabilities.
+Supports multiple collections:
+- strategy_docs: Static strategy documentation
+- matchup_learnings: Learned Pokemon matchup outcomes
+- mistake_learnings: Learned mistakes to avoid
 """
 
+import hashlib
 import logging
-import os
 from pathlib import Path
 from typing import Optional
+
+from .models import MatchupLearning, MistakeLearning
 
 logger = logging.getLogger(__name__)
 
 # Global store instance
 _strategy_store: Optional["StrategyStore"] = None
 
+# Collection names
+COLLECTION_STRATEGY_DOCS = "strategy_docs"
+COLLECTION_MATCHUP_LEARNINGS = "matchup_learnings"
+COLLECTION_MISTAKE_LEARNINGS = "mistake_learnings"
+
 
 class StrategyStore:
-    """Vector store for Pokemon battle strategy documents."""
+    """Vector store for Pokemon battle strategy documents and learnings.
+
+    Manages three collections:
+    - strategy_docs: Static strategy documentation from markdown files
+    - matchup_learnings: Learned Pokemon matchup outcomes from battles
+    - mistake_learnings: Learned mistakes to avoid in future battles
+    """
 
     def __init__(self, persist_dir: str = "./data/chroma"):
         """Initialize the ChromaDB store.
@@ -26,11 +41,11 @@ class StrategyStore:
         """
         self.persist_dir = persist_dir
         self._client = None
-        self._collection = None
+        self._collections: dict = {}
 
     def _ensure_initialized(self):
-        """Lazily initialize ChromaDB connection."""
-        if self._collection is not None:
+        """Lazily initialize ChromaDB connection and all collections."""
+        if self._collections:
             return
 
         try:
@@ -48,14 +63,26 @@ class StrategyStore:
                 )
             )
 
-            self._collection = self._client.get_or_create_collection(
-                name="strategy_docs",
-                metadata={"hnsw:space": "cosine"}
+            # Initialize all collections
+            self._collections[COLLECTION_STRATEGY_DOCS] = self._client.get_or_create_collection(
+                name=COLLECTION_STRATEGY_DOCS,
+                metadata={"hnsw:space": "cosine", "description": "Static strategy documentation"}
             )
 
+            self._collections[COLLECTION_MATCHUP_LEARNINGS] = self._client.get_or_create_collection(
+                name=COLLECTION_MATCHUP_LEARNINGS,
+                metadata={"hnsw:space": "cosine", "description": "Learned matchup outcomes"}
+            )
+
+            self._collections[COLLECTION_MISTAKE_LEARNINGS] = self._client.get_or_create_collection(
+                name=COLLECTION_MISTAKE_LEARNINGS,
+                metadata={"hnsw:space": "cosine", "description": "Learned mistakes to avoid"}
+            )
+
+            total_docs = sum(c.count() for c in self._collections.values())
             logger.info(
                 f"ChromaDB initialized at {self.persist_dir} "
-                f"with {self._collection.count()} documents"
+                f"with {total_docs} total documents across {len(self._collections)} collections"
             )
 
         except ImportError:
@@ -64,6 +91,12 @@ class StrategyStore:
         except Exception as e:
             logger.error(f"Failed to initialize ChromaDB: {e}")
             raise
+
+    @property
+    def _collection(self):
+        """Backward compatibility: return strategy_docs collection."""
+        self._ensure_initialized()
+        return self._collections[COLLECTION_STRATEGY_DOCS]
 
     def index_documents(self, docs_path: str) -> int:
         """Index all markdown files from a directory.
@@ -157,7 +190,7 @@ class StrategyStore:
         turn: int,
         outcome: Optional[str] = None,
     ) -> bool:
-        """Add a bot-generated learning to the store.
+        """Add a bot-generated learning to the store (legacy method).
 
         Args:
             content: The learning content
@@ -190,6 +223,209 @@ class StrategyStore:
         except Exception as e:
             logger.error(f"Failed to add learning: {e}")
             return False
+
+    def add_matchup_learning(self, learning: MatchupLearning) -> bool:
+        """Add a matchup learning to the dedicated collection.
+
+        Args:
+            learning: MatchupLearning object with full context
+
+        Returns:
+            True if successfully added
+        """
+        self._ensure_initialized()
+
+        try:
+            # Generate unique ID based on content hash
+            content = learning.to_document()
+            content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+            doc_id = f"matchup_{learning.pokemon}_{learning.opponent}_{content_hash}"
+
+            collection = self._collections[COLLECTION_MATCHUP_LEARNINGS]
+
+            # Check if similar learning already exists
+            existing = collection.get(ids=[doc_id])
+            if existing and existing["ids"]:
+                logger.debug(f"Matchup learning already exists: {doc_id}")
+                return True
+
+            collection.add(
+                ids=[doc_id],
+                documents=[content],
+                metadatas=[learning.to_metadata()]
+            )
+
+            logger.info(f"Added matchup learning: {learning.pokemon} vs {learning.opponent} ({learning.outcome.value})")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to add matchup learning: {e}")
+            return False
+
+    def add_mistake_learning(self, learning: MistakeLearning) -> bool:
+        """Add a mistake learning to the dedicated collection.
+
+        Args:
+            learning: MistakeLearning object with full context
+
+        Returns:
+            True if successfully added
+        """
+        self._ensure_initialized()
+
+        try:
+            # Generate unique ID based on content hash
+            content = learning.to_document()
+            content_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+            doc_id = f"mistake_{learning.mistake_type.value}_{content_hash}"
+
+            collection = self._collections[COLLECTION_MISTAKE_LEARNINGS]
+
+            # Check if similar learning already exists
+            existing = collection.get(ids=[doc_id])
+            if existing and existing["ids"]:
+                logger.debug(f"Mistake learning already exists: {doc_id}")
+                return True
+
+            collection.add(
+                ids=[doc_id],
+                documents=[content],
+                metadatas=[learning.to_metadata()]
+            )
+
+            logger.info(f"Added mistake learning: {learning.mistake_type.value} ({learning.our_pokemon} vs {learning.opponent})")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to add mistake learning: {e}")
+            return False
+
+    def query_matchups(
+        self,
+        pokemon: str,
+        opponent: Optional[str] = None,
+        role: Optional[str] = None,
+        format: str = "gen9randombattle",
+        k: int = 3,
+    ) -> list[dict]:
+        """Query matchup learnings with optional filtering.
+
+        Args:
+            pokemon: Our Pokemon species (required)
+            opponent: Opponent Pokemon species (optional filter)
+            role: Our Pokemon's role (optional filter)
+            format: Battle format (default: gen9randombattle)
+            k: Number of results to return
+
+        Returns:
+            List of dicts with 'document' and 'metadata' keys
+        """
+        self._ensure_initialized()
+
+        collection = self._collections[COLLECTION_MATCHUP_LEARNINGS]
+        if collection.count() == 0:
+            return []
+
+        try:
+            # Build query text
+            query_text = f"{pokemon} matchup"
+            if opponent:
+                query_text += f" vs {opponent}"
+            if role:
+                query_text += f" {role}"
+
+            # Build where clause for filtering
+            where_clause = {"format": format}
+            if opponent:
+                where_clause = {"$and": [{"format": format}, {"opponent": opponent}]}
+
+            results = collection.query(
+                query_texts=[query_text],
+                n_results=min(k, collection.count()),
+                where=where_clause if opponent else {"format": format},
+            )
+
+            return self._format_query_results(results)
+
+        except Exception as e:
+            logger.warning(f"Matchup query failed: {e}")
+            return []
+
+    def query_mistakes(
+        self,
+        situation: str,
+        pokemon: Optional[str] = None,
+        mistake_type: Optional[str] = None,
+        k: int = 3,
+    ) -> list[dict]:
+        """Query mistake learnings with optional filtering.
+
+        Args:
+            situation: Description of current situation
+            pokemon: Our Pokemon involved (optional filter)
+            mistake_type: Type of mistake to look for (optional filter)
+            k: Number of results to return
+
+        Returns:
+            List of dicts with 'document' and 'metadata' keys
+        """
+        self._ensure_initialized()
+
+        collection = self._collections[COLLECTION_MISTAKE_LEARNINGS]
+        if collection.count() == 0:
+            return []
+
+        try:
+            # Build where clause
+            where_conditions = []
+            if pokemon:
+                where_conditions.append({"pokemon": pokemon})
+            if mistake_type:
+                where_conditions.append({"mistake_type": mistake_type})
+
+            where_clause = None
+            if len(where_conditions) == 1:
+                where_clause = where_conditions[0]
+            elif len(where_conditions) > 1:
+                where_clause = {"$and": where_conditions}
+
+            results = collection.query(
+                query_texts=[situation],
+                n_results=min(k, collection.count()),
+                where=where_clause,
+            )
+
+            return self._format_query_results(results)
+
+        except Exception as e:
+            logger.warning(f"Mistake query failed: {e}")
+            return []
+
+    def _format_query_results(self, results: dict) -> list[dict]:
+        """Format ChromaDB query results into a list of dicts.
+
+        Args:
+            results: Raw ChromaDB query results
+
+        Returns:
+            List of dicts with 'document' and 'metadata' keys
+        """
+        if not results or not results.get("documents"):
+            return []
+
+        formatted = []
+        documents = results["documents"][0] if results["documents"] else []
+        metadatas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(documents)
+        distances = results["distances"][0] if results.get("distances") else [0.0] * len(documents)
+
+        for doc, meta, dist in zip(documents, metadatas, distances):
+            formatted.append({
+                "document": doc,
+                "metadata": meta,
+                "distance": dist,
+            })
+
+        return formatted
 
     def _chunk_document(
         self,
@@ -260,10 +496,18 @@ class StrategyStore:
         """
         self._ensure_initialized()
 
-        return {
-            "total_documents": self._collection.count(),
+        stats = {
             "persist_dir": self.persist_dir,
+            "collections": {},
+            "total_documents": 0,
         }
+
+        for name, collection in self._collections.items():
+            count = collection.count()
+            stats["collections"][name] = count
+            stats["total_documents"] += count
+
+        return stats
 
 
 def get_strategy_store(persist_dir: str = "./data/chroma") -> StrategyStore:

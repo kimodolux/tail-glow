@@ -1,5 +1,6 @@
 """Pokemon Showdown client using poke-env."""
 
+import asyncio
 import logging
 import uuid
 
@@ -8,6 +9,7 @@ from poke_env import Player, AccountConfiguration, ServerConfiguration, Showdown
 from src.config import Config
 from src.agent import create_agent
 from src.agent.graph import create_team_analysis_graph, create_battle_graph
+from src.agent.nodes.game_analysis import analyze_game_end
 from src.data import get_randbats_data, init_randbats_data
 from .formatter import format_battle_state
 
@@ -65,6 +67,8 @@ class TailGlowPlayer(Player):
         if battle.battle_tag not in self.battle_context:
             self.battle_context[battle.battle_tag] = {
                 "team_analysis": None,
+                "turn_reasoning": {},  # {turn: reasoning_string}
+                "accumulated_mistakes": [],  # Mistakes detected during the game
             }
 
         # Turn 1: Run team analysis first
@@ -80,6 +84,16 @@ class TailGlowPlayer(Player):
 
         # Run main battle graph
         result = self.battle_graph.invoke(initial_state)
+
+        # Store reasoning for battle history
+        reasoning = result.get("reasoning")
+        if reasoning:
+            self.battle_context[battle.battle_tag]["turn_reasoning"][battle.turn] = reasoning
+
+        # Store any mistakes detected from turn analysis
+        turn_mistakes = result.get("turn_mistakes", [])
+        if turn_mistakes:
+            self.battle_context[battle.battle_tag]["accumulated_mistakes"].extend(turn_mistakes)
 
         # Send reasoning as chat message before executing move
         await self._send_reasoning_chat(battle, result)
@@ -135,8 +149,10 @@ class TailGlowPlayer(Player):
 
     def _build_battle_state(self, battle, formatted_state: str) -> dict:
         """Build the complete battle state dictionary."""
-        # Get persisted team analysis
-        team_analysis = self.battle_context.get(battle.battle_tag, {}).get("team_analysis")
+        # Get persisted context
+        battle_ctx = self.battle_context.get(battle.battle_tag, {})
+        team_analysis = battle_ctx.get("team_analysis")
+        turn_reasoning = battle_ctx.get("turn_reasoning", {})
 
         # Create a trace ID for this battle turn graph execution
         trace_id = str(uuid.uuid4())
@@ -159,6 +175,10 @@ class TailGlowPlayer(Player):
             "trace_id": trace_id,
             # Team analysis (from turn 1)
             "team_analysis": team_analysis,
+            # Battle history context
+            "turn_reasoning": turn_reasoning,
+            "battle_log_context": None,
+            "strategy_analysis": None,
             # Parallel node outputs (will be populated by graph)
             "opponent_sets": {},
             "damage_calculations": None,
@@ -247,7 +267,7 @@ class TailGlowPlayer(Player):
         return "/team 123456"
 
     def _battle_finished_callback(self, battle):
-        """Track win rate when battle ends."""
+        """Track win rate and run game analysis when battle ends."""
         self.battles_played += 1
         won = battle.won
 
@@ -261,9 +281,38 @@ class TailGlowPlayer(Player):
             f"(Record: {self.battles_won}/{self.battles_played}, Win rate: {win_rate:.1f}%)"
         )
 
+        # Run game-end analysis to extract learnings (async in background)
+        battle_ctx = self.battle_context.get(battle.battle_tag, {})
+        if battle_ctx:
+            asyncio.create_task(self._run_game_analysis(battle, battle_ctx))
+
         # Clean up battle context
         if battle.battle_tag in self.battle_context:
             del self.battle_context[battle.battle_tag]
+
+    async def _run_game_analysis(self, battle, battle_context: dict):
+        """Run game-end analysis to extract learnings.
+
+        This runs asynchronously in the background after the battle ends.
+
+        Args:
+            battle: The completed battle object
+            battle_context: Context including team_analysis and turn_reasoning
+        """
+        try:
+            summary = await analyze_game_end(
+                battle=battle,
+                battle_context=battle_context,
+                username=self.username,
+            )
+            if summary:
+                logger.info(
+                    f"Game analysis complete for {battle.battle_tag}: "
+                    f"{len(summary.matchups_learned)} matchups, "
+                    f"{len(summary.mistakes_made)} mistakes learned"
+                )
+        except Exception as e:
+            logger.error(f"Game analysis failed for {battle.battle_tag}: {e}")
 
 
 async def run_battles(n_battles: int = 1):

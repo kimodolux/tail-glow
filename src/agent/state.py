@@ -43,6 +43,11 @@ class AgentState(TypedDict):
     # --- Team analysis ---
     team_analysis: Optional[str]  # LLM analysis of our team roles (Turn 1)
 
+    # --- Battle history ---
+    turn_reasoning: Optional[dict[int, str]]  # {turn: reasoning} from previous turns
+    battle_log_context: Optional[str]  # Formatted battle log for prompts
+    strategy_analysis: Optional[str]  # LLM analysis of battle progress
+
     # --- Parallel node outputs ---
     opponent_sets: dict[str, Any]  # Randbats data for opponent Pokemon
     damage_calculations: Optional[str]  # Formatted damage calc results
@@ -52,3 +57,8 @@ class AgentState(TypedDict):
     type_matchups: Optional[str]  # Offensive/defensive matchups
     effects_analysis: Optional[str]  # Relevant item/ability/move effects
     strategy_context: Optional[str]  # RAG retrieval results
+
+    # --- Self-learning ---
+    general_strategy: Optional[str]  # Core strategy document content
+    turn_mistakes: Optional[list]  # Mistakes detected on the previous turn
+    accumulated_mistakes: Optional[list]  # All mistakes accumulated during the game

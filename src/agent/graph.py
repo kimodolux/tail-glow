@@ -3,12 +3,17 @@
 Architecture:
 - Team Analysis Graph: Runs on turn 1 only (LLM Call #1)
 - Main Battle Graph: Runs every turn with parallel information gathering
-  - Sequential: format_state → update_teams_state → fetch_sets
+  - Sequential: format_state → analyze_turn → update_teams_state → fetch_sets
   - Parallel: damage, speed, types, effects (fan-out)
-  - Sequential: strategy_rag → decide (LLM #2) → parse
+  - Sequential: strategy_rag → analyze_strategy (LLM #2) → decide (LLM #3) → parse
 
 The update_teams_state node maintains cached stats and revealed information
 for both teams across turns, avoiding redundant calculations.
+
+The analyze_turn node reviews the previous turn for mistakes to learn from.
+
+The analyze_strategy node reviews battle history and provides strategic
+guidance for the decision node.
 """
 
 import logging
@@ -28,6 +33,8 @@ from .nodes import (
     lookup_strategy_node,
     analyze_team_node,
     update_teams_state_node,
+    analyze_strategy_node,
+    analyze_turn_node,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,16 +61,20 @@ def create_battle_graph() -> StateGraph:
 
     Flow:
     1. format_state - Format battle state for display/context
-    2. fetch_opponent_sets - Get randbats data for opponent Pokemon
-    3. PARALLEL: damage, speed, types, effects - Information gathering
-    4. strategy_rag - Retrieve strategy documents
-    5. decide_action - LLM Call #2: Make final decision
-    6. parse_decision - Extract action from LLM response
+    2. analyze_turn - Analyze previous turn for mistakes (skipped on turn 1)
+    3. update_teams_state - Update cached team information
+    4. fetch_opponent_sets - Get randbats data for opponent Pokemon
+    5. PARALLEL: damage, speed, types, effects - Information gathering
+    6. lookup_strategy - Retrieve strategy documents (RAG)
+    7. analyze_strategy - LLM Call #2: Analyze battle progress
+    8. decide_action - LLM Call #3: Make final decision
+    9. parse_decision - Extract action from LLM response
     """
     workflow = StateGraph(AgentState)
 
     # Add all nodes
     workflow.add_node("format_state", format_state_node)
+    workflow.add_node("analyze_turn", analyze_turn_node)
     workflow.add_node("update_teams_state", update_teams_state_node)
     workflow.add_node("fetch_opponent_sets", fetch_opponent_sets_node)
     workflow.add_node("calculate_damage", calculate_damage_node)
@@ -71,12 +82,14 @@ def create_battle_graph() -> StateGraph:
     workflow.add_node("get_type_matchups", get_type_matchups_node)
     workflow.add_node("get_effects", get_effects_node)
     workflow.add_node("lookup_strategy", lookup_strategy_node)
+    workflow.add_node("analyze_strategy", analyze_strategy_node)
     workflow.add_node("decide_action", decide_action_node)
     workflow.add_node("parse_decision", parse_decision_node)
 
-    # Sequential start: format_state → update_teams_state → fetch_opponent_sets
+    # Sequential start: format_state → analyze_turn → update_teams_state → fetch_opponent_sets
     workflow.add_edge(START, "format_state")
-    workflow.add_edge("format_state", "update_teams_state")
+    workflow.add_edge("format_state", "analyze_turn")
+    workflow.add_edge("analyze_turn", "update_teams_state")
     workflow.add_edge("update_teams_state", "fetch_opponent_sets")
 
     # Parallel fan-out from fetch_opponent_sets
@@ -91,8 +104,9 @@ def create_battle_graph() -> StateGraph:
     workflow.add_edge("get_type_matchups", "lookup_strategy")
     workflow.add_edge("get_effects", "lookup_strategy")
 
-    # Continue sequential
-    workflow.add_edge("lookup_strategy", "decide_action")
+    # Continue sequential: lookup_strategy → analyze_strategy → decide → parse
+    workflow.add_edge("lookup_strategy", "analyze_strategy")
+    workflow.add_edge("analyze_strategy", "decide_action")
     workflow.add_edge("decide_action", "parse_decision")
     workflow.add_edge("parse_decision", END)
 
