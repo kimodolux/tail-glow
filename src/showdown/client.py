@@ -35,6 +35,7 @@ class TailGlowPlayer(Player):
 
         # Battle context storage (persists team analysis across turns)
         self.battle_context: dict[str, dict] = {}
+        self._game_analysis_tasks: set[asyncio.Task] = set()
 
         # Stats
         self.battles_played = 0
@@ -69,6 +70,8 @@ class TailGlowPlayer(Player):
                 "team_analysis": None,
                 "turn_reasoning": {},  # {turn: reasoning_string}
                 "accumulated_mistakes": [],  # Mistakes detected during the game
+                "teams_state": None,  # Cached stats and revealed info for both teams
+                "game_memory": None,  # Per-game memory store
             }
 
         # Turn 1: Run team analysis first
@@ -95,6 +98,16 @@ class TailGlowPlayer(Player):
         if turn_mistakes:
             self.battle_context[battle.battle_tag]["accumulated_mistakes"].extend(turn_mistakes)
 
+        # Store updated game memory
+        game_memory = result.get("game_memory")
+        if game_memory:
+            self.battle_context[battle.battle_tag]["game_memory"] = game_memory
+
+        # Store updated teams state
+        teams_state = result.get("teams_state")
+        if teams_state:
+            self.battle_context[battle.battle_tag]["teams_state"] = teams_state
+
         # Send reasoning as chat message before executing move
         await self._send_reasoning_chat(battle, result)
 
@@ -114,6 +127,8 @@ class TailGlowPlayer(Player):
             "battle_tag": battle.battle_tag,
             "battle_object": battle,
             "turn": battle.turn,
+            "teams_state": None,
+            "game_memory": None,
             "formatted_state": "",
             "tool_results": {},
             "llm_response": "",
@@ -153,6 +168,8 @@ class TailGlowPlayer(Player):
         battle_ctx = self.battle_context.get(battle.battle_tag, {})
         team_analysis = battle_ctx.get("team_analysis")
         turn_reasoning = battle_ctx.get("turn_reasoning", {})
+        teams_state = battle_ctx.get("teams_state")
+        game_memory = battle_ctx.get("game_memory")
 
         # Create a trace ID for this battle turn graph execution
         trace_id = str(uuid.uuid4())
@@ -179,6 +196,10 @@ class TailGlowPlayer(Player):
             "turn_reasoning": turn_reasoning,
             "battle_log_context": None,
             "strategy_analysis": None,
+            # Team state tracking
+            "teams_state": teams_state,
+            # Game memory (persists across turns)
+            "game_memory": game_memory,
             # Parallel node outputs (will be populated by graph)
             "opponent_sets": {},
             "damage_calculations": None,
@@ -284,7 +305,9 @@ class TailGlowPlayer(Player):
         # Run game-end analysis to extract learnings (async in background)
         battle_ctx = self.battle_context.get(battle.battle_tag, {})
         if battle_ctx:
-            asyncio.create_task(self._run_game_analysis(battle, battle_ctx))
+            task = asyncio.create_task(self._run_game_analysis(battle, battle_ctx))
+            self._game_analysis_tasks.add(task)
+            task.add_done_callback(self._game_analysis_tasks.discard)
 
         # Clean up battle context
         if battle.battle_tag in self.battle_context:
@@ -313,6 +336,15 @@ class TailGlowPlayer(Player):
                 )
         except Exception as e:
             logger.error(f"Game analysis failed for {battle.battle_tag}: {e}")
+
+    async def wait_for_game_analysis(self):
+        """Wait for any pending game-end analysis tasks to finish."""
+        if not self._game_analysis_tasks:
+            return
+
+        pending_tasks = tuple(self._game_analysis_tasks)
+        logger.info(f"Waiting for {len(pending_tasks)} game analysis task(s) to finish...")
+        await asyncio.gather(*pending_tasks, return_exceptions=True)
 
 
 async def run_battles(n_battles: int = 1):
@@ -344,7 +376,10 @@ async def run_battles(n_battles: int = 1):
     logger.info(f"Server: {Config.SHOWDOWN_SERVER}")
     logger.info(f"Format: {Config.BATTLE_FORMAT}")
 
-    await player.ladder(n_battles)
+    try:
+        await player.ladder(n_battles)
+    finally:
+        await player.wait_for_game_analysis()
 
     # Print final stats
     logger.info("=" * 50)

@@ -8,10 +8,12 @@ Tail Glow is an autonomous bot that plays competitive Pokemon Random Battles on 
 
 1. Connecting to Pokemon Showdown via WebSocket
 2. Analyzing team composition on turn 1
-3. Gathering battle intelligence in parallel (damage, speed, types, effects)
-4. Retrieving relevant strategy from RAG system
-5. Analysing the above to choose a move
-6. Executing moves and switches in real-time
+3. Maintaining per-battle memory and cached team state across turns
+4. Reviewing the previous turn for mistakes and opponent patterns
+5. Gathering battle intelligence in parallel (damage, speed, types, effects)
+6. Retrieving optional matchup strategy from the RAG system
+7. Analyzing the battle plan and choosing a move or switch
+8. Executing moves and switches in real-time
 
 ## Quick Start
 
@@ -104,19 +106,29 @@ analyze_team [LLM #1] → END
 
 **Battle Graph** (Every turn):
 ```
-format_state → fetch_opponent_sets
-                      ↓
-     ┌────────────────┼────────────────┐────────────────┐
-     ↓                ↓                ↓                ↓
-  damage           speed            types           effects   (PARALLEL)
-     ↓                ↓                ↓                ↓
-     └────────────────┼────────────────┴────────────────┘
-                      ↓
-              strategy_rag (RAG)
-                      ↓
-            decide_action [LLM #2]
-                      ↓
-              parse_decision
+format_state
+     ↓
+update_game_memory
+     ↓
+analyze_turn [LLM, skipped on turn 1]
+     ↓
+update_teams_state
+     ↓
+fetch_opponent_sets
+     ↓
+┌──────────────┬──────────────┬──────────────┬──────────────┐
+↓              ↓              ↓              ↓
+damage         speed          types          effects        (PARALLEL)
+↓              ↓              ↓              ↓
+└──────────────┴──────────────┴──────────────┴──────────────┘
+     ↓
+lookup_strategy (optional RAG)
+     ↓
+analyze_strategy [LLM, static fallback on turn 1]
+     ↓
+decide_action [LLM]
+     ↓
+parse_decision
 ```
 
 ### LLM Calls Per Turn
@@ -124,19 +136,26 @@ format_state → fetch_opponent_sets
 | Call | Node | Purpose |
 |------|------|---------|
 | #1 | `analyze_team` | Catalog team roles, strengths, weaknesses (turn 1 only) |
-| #2 | `decide_action` | Make final move/switch decision using all gathered info |
+| #2 | `analyze_turn` | Review the previous turn for mistakes and lessons (skipped on turn 1) |
+| #3 | `analyze_strategy` | Review battle history, strategy docs, and current plan (skips LLM on turn 1) |
+| #4 | `decide_action` | Make final move/switch decision using all gathered info |
+| Post-game | `analyze_game_end` | Extract matchup learnings and mistakes after the battle ends |
+
+Typical turn 1 uses team analysis plus decision. Later turns usually use turn analysis, strategy analysis, and decision.
 
 ### Data Gathering Nodes (No LLM)
 
 | Node | Purpose |
 |------|---------|
 | `format_state` | Format battle state for display |
+| `update_game_memory` | Parse previous-turn events into per-game memory |
+| `update_teams_state` | Maintain cached stats, HP, status, boosts, and revealed team info |
 | `fetch_opponent_sets` | Get possible sets from randbats data |
 | `calculate_damage` | Damage calculations for all moves |
 | `calculate_speed` | Speed comparison + priority analysis |
 | `get_type_matchups` | Offensive/defensive type effectiveness |
 | `get_effects` | Relevant item/ability/move effects |
-| `lookup_strategy` | RAG retrieval from strategy docs |
+| `lookup_strategy` | Optional RAG retrieval from strategy docs and learned outcomes |
 
 ## Features
 
@@ -176,11 +195,17 @@ Curated competitive item/ability effects:
 
 ### RAG Strategy System
 
-ChromaDB-powered retrieval for strategy documents:
+ChromaDB-powered retrieval is optional and controlled by `ENABLE_RAG=true`.
+When enabled, the retriever can combine static strategy documents with learned
+matchup and mistake records:
 
 - Index markdown files from `docs/strategy/`
 - Query by Pokemon matchup
+- Query learned matchup outcomes and mistake lessons
 - Include relevant tips in LLM context
+
+General strategy documents in `docs/strategy/general/` are also loaded directly
+into the strategy analysis prompt, even when Chroma RAG is disabled.
 
 To add strategy documents:
 ```bash
@@ -213,21 +238,34 @@ tail-glow/
 │   ├── agent/
 │   │   ├── graph.py           # LangGraph workflows (battle + team analysis)
 │   │   ├── state.py           # AgentState TypedDict
-│   │   ├── prompts.py         # Legacy prompts (backward compat)
 │   │   ├── nodes/             # Individual graph nodes
-│   │   │   ├── team_analysis.py   # LLM Call #1
-│   │   │   ├── decide.py          # LLM Call #2
-│   │   │   ├── damage.py
-│   │   │   ├── speed.py
-│   │   │   ├── types.py
+│   │   │   ├── damage.py          # Damage calculations
+│   │   │   ├── decide.py          # Final decision LLM call
 │   │   │   ├── effects.py
 │   │   │   ├── fetch_sets.py
 │   │   │   ├── strategy_rag.py
+│   │   │   ├── strategy_analysis.py
+│   │   │   ├── team_analysis.py
+│   │   │   ├── teams.py
+│   │   │   ├── turn_analysis.py
 │   │   │   ├── format_state.py
+│   │   │   ├── game_analysis.py
+│   │   │   ├── memory.py
+│   │   │   ├── speed.py
+│   │   │   ├── type_matchups.py
 │   │   │   └── parse.py
 │   │   └── prompts/           # Prompt templates
+│   │       ├── decision.py
+│   │       ├── game_analysis.py
+│   │       ├── strategy_analysis.py
 │   │       ├── team_analysis.py
-│   │       └── decision.py
+│   │       └── turn_analysis.py
+│   │
+│   ├── battle/
+│   │   ├── event_parser.py    # Parse poke-env observations
+│   │   ├── game_memory.py     # Per-game memory and opponent patterns
+│   │   ├── log_formatter.py   # Battle history formatting
+│   │   └── teams_state.py     # Cached team state and revealed info
 │   │
 │   ├── damage_calc/
 │   │   └── calculator.py      # Damage calculations
@@ -240,6 +278,8 @@ tail-glow/
 │   │   └── effects.py         # Curated competitive effects
 │   │
 │   ├── rag/
+│   │   ├── models.py          # Learned matchup/mistake data models
+│   │   ├── strategy_loader.py # Direct general strategy loading
 │   │   ├── store.py           # ChromaDB vector store
 │   │   └── retriever.py       # Strategy retrieval
 │   │

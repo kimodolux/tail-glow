@@ -14,6 +14,8 @@ from .teams import update_teams_state_node
 from .strategy_analysis import analyze_strategy_node
 from .turn_analysis import analyze_turn_node
 from .game_analysis import analyze_game_end
+from .memory import update_game_memory_node
+from .predict import predict_opponent_node
 
 __all__ = [
     "format_state_node",
@@ -31,4 +33,8 @@ __all__ = [
     # Self-learning nodes
     "analyze_turn_node",
     "analyze_game_end",
+    # Memory node
+    "update_game_memory_node",
+    # Prediction node
+    "predict_opponent_node",
 ]

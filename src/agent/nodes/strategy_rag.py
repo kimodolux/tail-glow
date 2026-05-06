@@ -3,6 +3,7 @@
 import logging
 
 from ..state import AgentState
+from src.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,10 @@ def lookup_strategy_node(state: AgentState) -> AgentState:
     Look up relevant strategy documents from the vector store.
     Uses the current matchup and team context to find relevant advice.
     """
+    if not Config.ENABLE_RAG:
+        state["strategy_context"] = None
+        return state
+
     battle = state.get("battle_object")
     if not battle or not battle.active_pokemon or not battle.opponent_active_pokemon:
         logger.warning("No active Pokemon in state, skipping strategy lookup")

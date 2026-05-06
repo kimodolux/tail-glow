@@ -130,33 +130,34 @@ def _parse_events(
         if len(event) < 2:
             continue
 
-        event_type = event[0]
+        # Events have empty string prefix: ['', 'move', 'p1a: Pokemon', 'MoveName', ...]
+        event_type = event[1] if len(event) > 1 else event[0]
 
         if event_type == "move":
-            # Format: ["move", "p1a: Pokemon", "MoveName", ...]
-            if len(event) >= 3:
-                actor = event[1]
-                move_name = event[2]
+            # Format: ['', 'move', 'p1a: Pokemon', 'MoveName', ...]
+            if len(event) >= 4:
+                actor = event[2]
+                move_name = event[3]
                 if actor.startswith(our_player):
                     our_action = f"used: {_format_move_name(move_name)}"
                 elif actor.startswith(their_player):
                     their_action = f"used: {_format_move_name(move_name)}"
 
         elif event_type in ("switch", "drag"):
-            # Format: ["switch", "p1a: Pokemon", "PokemonName", "100/100"]
-            if len(event) >= 3:
-                actor = event[1]
-                species = event[2].split(",")[0]  # Remove level/gender info
+            # Format: ['', 'switch', 'p1a: Pokemon', 'PokemonName', '100/100']
+            if len(event) >= 4:
+                actor = event[2]
+                species = event[3].split(",")[0]  # Remove level/gender info
                 if actor.startswith(our_player):
                     our_action = f"switched to: {_format_pokemon_name(species)}"
                 elif actor.startswith(their_player):
                     their_action = f"switched to: {_format_pokemon_name(species)}"
 
         elif event_type == "-damage":
-            # Format: ["-damage", "p1a: Pokemon", "50/100", ...]
-            if len(event) >= 3:
-                target = event[1]
-                hp_str = event[2]
+            # Format: ['', '-damage', 'p1a: Pokemon', '50/100', ...]
+            if len(event) >= 4:
+                target = event[2]
+                hp_str = event[3]
                 damage_pct = _parse_damage(hp_str)
                 if damage_pct is not None:
                     if target.startswith(our_player):

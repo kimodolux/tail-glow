@@ -168,7 +168,12 @@ def _parse_matchups(section: str) -> list[dict]:
     lines = section.split("\n")
 
     # Pattern: - pokemon (role) OUTCOME vs opponent (role) when conditions: "lesson"
-    pattern = r'-\s*(\w+)\s*\(([^)]+)\)\s*(WINS|LOSES|TRADES|DEPENDS)\s*vs\s*(\w+)\s*\(([^)]+)\)\s*when\s*([^:]+):\s*["\']?([^"\']+)["\']?'
+    pattern = (
+        r'-\s*([^(]+?)\s*\(([^)]+)\)\s*'
+        r'(WINS|LOSES|TRADES|DEPENDS)\s*vs\s*'
+        r'([^(]+?)\s*\(([^)]+)\)\s*'
+        r'when\s*([^:]+):\s*["\']?([^"\']+)["\']?'
+    )
 
     for line in lines:
         line = line.strip()
@@ -184,10 +189,10 @@ def _parse_matchups(section: str) -> list[dict]:
                 outcome = MatchupOutcome.DEPENDS
 
             matchups.append({
-                "pokemon": match.group(1).lower(),
+                "pokemon": match.group(1).strip().lower(),
                 "our_role": match.group(2).strip(),
                 "outcome": outcome,
-                "opponent": match.group(4).lower(),
+                "opponent": match.group(4).strip().lower(),
                 "opponent_role": match.group(5).strip(),
                 "conditions": match.group(6).strip(),
                 "lesson": match.group(7).strip(),

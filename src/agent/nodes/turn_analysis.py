@@ -15,6 +15,7 @@ from ..prompts.turn_analysis import (
 )
 from src.llm import get_llm_provider
 from src.rag.models import MistakeLearning, MistakeType, SetContext
+from src.battle.event_parser import format_turn_events_for_analysis, determine_turn_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -46,25 +47,25 @@ def analyze_turn_node(state: AgentState) -> dict:
     turn_reasoning = state.get("turn_reasoning", {})
     reasoning = turn_reasoning.get(previous_turn, "")
 
-    # Build turn events description
-    turn_events = _format_turn_events(obs, battle)
-
-    # Build outcome description
-    outcome = _determine_outcome(obs, battle)
-
-    # Get damage context if available
-    damage_context = state.get("damage_calculations", "")
-
-    # Build and call LLM
-    user_prompt = build_turn_analysis_prompt(
-        turn_number=previous_turn,
-        turn_events=turn_events,
-        our_reasoning=reasoning,
-        damage_context=damage_context,
-        outcome=outcome,
-    )
-
     try:
+        # Build turn events description (using shared parser)
+        turn_events = format_turn_events_for_analysis(obs, battle)
+
+        # Build outcome description (using shared parser)
+        outcome = determine_turn_outcome(obs, battle)
+
+        # Get damage context if available
+        damage_context = state.get("damage_calculations", "")
+
+        # Build and call LLM
+        user_prompt = build_turn_analysis_prompt(
+            turn_number=previous_turn,
+            turn_events=turn_events,
+            our_reasoning=reasoning,
+            damage_context=damage_context,
+            outcome=outcome,
+        )
+
         llm = get_llm_provider()
         username = state.get("username")
         trace_id = state.get("trace_id")
@@ -104,146 +105,6 @@ def analyze_turn_node(state: AgentState) -> dict:
         logger.error(f"Turn analysis failed: {e}")
 
     return {"turn_mistakes": []}
-
-
-def _format_turn_events(obs, battle) -> str:
-    """Format the events of a turn for analysis.
-
-    Args:
-        obs: Observation object for the turn
-        battle: Battle object for context
-
-    Returns:
-        Formatted description of turn events
-    """
-    lines = []
-
-    # Matchup
-    our_pokemon = "Unknown"
-    their_pokemon = "Unknown"
-
-    if obs.active_pokemon:
-        our_pokemon = obs.active_pokemon.species
-        if obs.active_pokemon.status:
-            our_pokemon += f" [{obs.active_pokemon.status.name}]"
-
-    if obs.opponent_active_pokemon:
-        their_pokemon = obs.opponent_active_pokemon.species
-        if obs.opponent_active_pokemon.status:
-            their_pokemon += f" [{obs.opponent_active_pokemon.status.name}]"
-
-    lines.append(f"Matchup: {our_pokemon} vs {their_pokemon}")
-
-    # Parse events
-    our_player = "p1" if battle.player_role == "p1" else "p2"
-    their_player = "p2" if our_player == "p1" else "p1"
-
-    our_actions = []
-    their_actions = []
-    fainted = []
-    boosts = []
-
-    for event in obs.events:
-        if len(event) < 2:
-            continue
-
-        event_type = event[0]
-
-        if event_type == "move":
-            if len(event) >= 3:
-                actor = event[1]
-                move_name = event[2]
-                if actor.startswith(our_player):
-                    our_actions.append(f"used {move_name}")
-                elif actor.startswith(their_player):
-                    their_actions.append(f"used {move_name}")
-
-        elif event_type in ("switch", "drag"):
-            if len(event) >= 3:
-                actor = event[1]
-                species = event[2].split(",")[0]
-                if actor.startswith(our_player):
-                    our_actions.append(f"switched to {species}")
-                elif actor.startswith(their_player):
-                    their_actions.append(f"switched to {species}")
-
-        elif event_type == "faint":
-            if len(event) >= 2:
-                actor = event[1]
-                if actor.startswith(our_player):
-                    fainted.append(f"Our Pokemon fainted")
-                elif actor.startswith(their_player):
-                    fainted.append(f"Their Pokemon fainted")
-
-        elif event_type == "-boost":
-            if len(event) >= 4:
-                actor = event[1]
-                stat = event[2]
-                amount = event[3]
-                if actor.startswith(their_player):
-                    boosts.append(f"Opponent boosted {stat} by {amount}")
-
-    if our_actions:
-        lines.append(f"Our action: {', '.join(our_actions)}")
-    if their_actions:
-        lines.append(f"Their action: {', '.join(their_actions)}")
-    if fainted:
-        lines.append(f"Faints: {', '.join(fainted)}")
-    if boosts:
-        lines.append(f"Boosts: {', '.join(boosts)}")
-
-    return "\n".join(lines)
-
-
-def _determine_outcome(obs, battle) -> str:
-    """Determine the outcome of the turn.
-
-    Args:
-        obs: Observation object for the turn
-        battle: Battle object for context
-
-    Returns:
-        Description of the turn outcome
-    """
-    our_player = "p1" if battle.player_role == "p1" else "p2"
-    their_player = "p2" if our_player == "p1" else "p1"
-
-    outcomes = []
-
-    our_fainted = False
-    their_fainted = False
-
-    for event in obs.events:
-        if len(event) < 2:
-            continue
-
-        event_type = event[0]
-
-        if event_type == "faint":
-            actor = event[1]
-            if actor.startswith(our_player):
-                our_fainted = True
-            elif actor.startswith(their_player):
-                their_fainted = True
-
-    if our_fainted and their_fainted:
-        outcomes.append("Both Pokemon fainted (trade)")
-    elif our_fainted:
-        outcomes.append("Our Pokemon was KO'd")
-    elif their_fainted:
-        outcomes.append("Their Pokemon was KO'd")
-
-    # Check current HP if available
-    if obs.active_pokemon and not our_fainted:
-        hp_pct = obs.active_pokemon.current_hp_fraction * 100
-        outcomes.append(f"Our Pokemon at {hp_pct:.0f}% HP")
-
-    if obs.opponent_active_pokemon and not their_fainted:
-        # Opponent HP is estimated
-        hp_pct = obs.opponent_active_pokemon.current_hp_fraction * 100
-        outcomes.append(f"Their Pokemon at ~{hp_pct:.0f}% HP")
-
-    return "; ".join(outcomes) if outcomes else "Turn completed normally"
 
 
 def _create_mistake_learning(

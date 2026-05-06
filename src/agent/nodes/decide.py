@@ -29,6 +29,14 @@ def decide_action_node(state: AgentState) -> AgentState:
     strategy_analysis = state.get("strategy_analysis")
     team_analysis = state.get("team_analysis")
 
+    # Get opponent prediction
+    opponent_prediction = state.get("opponent_prediction")
+    opponent_prediction_str = _format_opponent_prediction(opponent_prediction)
+
+    # Get game memory and format for prompt
+    game_memory = state.get("game_memory")
+    game_memory_str = game_memory.format_for_prompt() if game_memory else None
+
     # Format available options
     available_moves = _format_available_moves(battle)
     available_switches = _format_available_switches(battle)
@@ -44,6 +52,8 @@ def decide_action_node(state: AgentState) -> AgentState:
         team_analysis=team_analysis,
         available_moves=available_moves,
         available_switches=available_switches,
+        game_memory=game_memory_str,
+        opponent_prediction=opponent_prediction_str,
     )
 
     try:
@@ -82,7 +92,7 @@ def _format_available_moves(battle) -> str:
         move_name = move.id.replace("-", " ").title()
         move_type = move.type.name if move.type else "???"
         base_power = move.base_power if move.base_power else "—"
-        accuracy = f"{move.accuracy}%" if move.accuracy else "—"
+        accuracy = _format_accuracy(move.accuracy)
 
         # Include priority if non-zero
         priority_str = f" [Priority +{move.priority}]" if move.priority > 0 else ""
@@ -91,6 +101,24 @@ def _format_available_moves(battle) -> str:
         lines.append(f"- {move_name} ({move_type}, {base_power} BP, {accuracy} acc){priority_str}")
 
     return "\n".join(lines) if lines else "None available"
+
+
+def _format_accuracy(accuracy) -> str:
+    """Format poke-env move accuracy for prompts."""
+    if accuracy is True:
+        return "—"
+    if not accuracy:
+        return "—"
+
+    try:
+        accuracy_value = float(accuracy)
+    except (TypeError, ValueError):
+        return str(accuracy)
+
+    if accuracy_value <= 1:
+        accuracy_value *= 100
+
+    return f"{accuracy_value:.0f}%"
 
 
 def _format_available_switches(battle) -> str:
@@ -120,3 +148,44 @@ def _create_fallback_response(battle) -> str:
         return f"REASONING: LLM error fallback.\nACTION: Switch to {first_switch}"
     else:
         return "REASONING: No options available.\nACTION: Struggle"
+
+
+def _format_opponent_prediction(prediction: dict | None) -> str | None:
+    """Format opponent prediction for the decision prompt."""
+    if not prediction:
+        return None
+
+    lines = ["## Opponent Prediction"]
+
+    top = prediction.get("top_prediction", {})
+    if top.get("action"):
+        prob = top.get("probability", 0) * 100
+        reasoning = top.get("reasoning", "")
+        lines.append(f"**Most likely:** {top['action']} ({prob:.0f}%)")
+        if reasoning:
+            lines.append(f"  Reasoning: {reasoning}")
+        lines.append("")
+
+    # Show move predictions
+    moves = prediction.get("moves", {})
+    if moves:
+        lines.append("**Move probabilities:**")
+        # Sort by probability descending
+        sorted_moves = sorted(moves.items(), key=lambda x: x[1].get("probability", 0), reverse=True)
+        for move, data in sorted_moves:
+            prob = data.get("probability", 0) * 100
+            reasoning = data.get("reasoning", "")
+            lines.append(f"- {move}: {prob:.0f}%{f' - {reasoning}' if reasoning else ''}")
+        lines.append("")
+
+    # Show switch predictions
+    switches = prediction.get("switches", {})
+    if switches:
+        lines.append("**Switch probabilities:**")
+        sorted_switches = sorted(switches.items(), key=lambda x: x[1].get("probability", 0), reverse=True)
+        for pokemon, data in sorted_switches:
+            prob = data.get("probability", 0) * 100
+            reasoning = data.get("reasoning", "")
+            lines.append(f"- {pokemon}: {prob:.0f}%{f' - {reasoning}' if reasoning else ''}")
+
+    return "\n".join(lines)
