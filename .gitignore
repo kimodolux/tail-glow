@@ -201,6 +201,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Chroma vector DB (local data, not source)
+data/chroma/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

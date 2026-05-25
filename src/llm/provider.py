@@ -2,6 +2,9 @@
 
 import logging
 import os
+import threading
+import time
+from collections import deque
 
 import litellm
 from litellm import completion
@@ -12,6 +15,69 @@ logger = logging.getLogger(__name__)
 
 # Configure LiteLLM
 litellm.drop_params = True  # Ignore unsupported params per provider
+
+
+class _InputTokenRateLimiter:
+    """Process-wide sliding-window limiter for hosted LLM input tokens."""
+
+    def __init__(self) -> None:
+        self._events: deque[tuple[float, int]] = deque()
+        self._lock = threading.Lock()
+
+    def wait_for_capacity(self, estimated_tokens: int, limit_per_minute: int) -> None:
+        if estimated_tokens <= 0 or limit_per_minute <= 0:
+            return
+
+        # A single oversized prompt cannot be made safe by waiting.
+        if estimated_tokens >= limit_per_minute:
+            logger.warning(
+                "Estimated prompt size (%s input tokens) exceeds configured per-minute limit (%s)",
+                estimated_tokens,
+                limit_per_minute,
+            )
+            return
+
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                self._discard_expired(now)
+                used = sum(tokens for _, tokens in self._events)
+
+                if used + estimated_tokens <= limit_per_minute:
+                    self._events.append((now, estimated_tokens))
+                    return
+
+                oldest_ts, _ = self._events[0]
+                wait_seconds = max(0.1, 60 - (now - oldest_ts))
+
+            logger.info(
+                "LLM input-token throttle sleeping %.1fs (%s/%s TPM used, next prompt ~%s)",
+                wait_seconds,
+                used,
+                limit_per_minute,
+                estimated_tokens,
+            )
+            time.sleep(wait_seconds)
+
+    def _discard_expired(self, now: float) -> None:
+        while self._events and now - self._events[0][0] >= 60:
+            self._events.popleft()
+
+
+_input_token_rate_limiter = _InputTokenRateLimiter()
+
+
+def _estimate_input_tokens(*parts: str) -> int:
+    """Estimate input tokens without adding a tokenizer dependency."""
+    text = "\n".join(part or "" for part in parts)
+    return max(1, len(text) // 4)
+
+
+def _is_rate_limit_error(error: Exception) -> bool:
+    error_name = type(error).__name__.lower()
+    error_text = str(error).lower()
+    return "ratelimit" in error_name or "rate_limit" in error_text or "rate limit" in error_text
+
 
 class LLMProvider:
     """Unified LLM provider using LiteLLM."""
@@ -88,19 +154,44 @@ class LLMProvider:
         if tags:
             metadata["tags"] = tags
 
-        response = completion(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            max_tokens=512,
-            success_callback=self.callbacks,
-            failure_callback=self.callbacks,
-            metadata=metadata if metadata else None,
-        )
+        if Config.LLM_RATE_LIMIT_ENABLED and Config.LLM_PROVIDER == "anthropic":
+            estimated_input_tokens = _estimate_input_tokens(system_prompt, user_prompt)
+            _input_token_rate_limiter.wait_for_capacity(
+                estimated_input_tokens,
+                Config.LLM_INPUT_TOKENS_PER_MINUTE,
+            )
 
-        return response.choices[0].message.content
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        last_error = None
+        for attempt in range(Config.LLM_RATE_LIMIT_RETRIES + 1):
+            try:
+                response = completion(
+                    model=self.model,
+                    messages=messages,
+                    max_tokens=512,
+                    success_callback=self.callbacks,
+                    failure_callback=self.callbacks,
+                    metadata=metadata if metadata else None,
+                )
+                return response.choices[0].message.content
+            except Exception as e:
+                last_error = e
+                if not _is_rate_limit_error(e) or attempt >= Config.LLM_RATE_LIMIT_RETRIES:
+                    raise
+
+                logger.warning(
+                    "LLM rate limit hit; retrying in %.1fs (attempt %s/%s)",
+                    Config.LLM_RATE_LIMIT_RETRY_DELAY_SECONDS,
+                    attempt + 1,
+                    Config.LLM_RATE_LIMIT_RETRIES,
+                )
+                time.sleep(Config.LLM_RATE_LIMIT_RETRY_DELAY_SECONDS)
+
+        raise last_error
 
 
 def get_llm_provider() -> LLMProvider:

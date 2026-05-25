@@ -86,7 +86,7 @@ class TailGlowPlayer(Player):
         initial_state = self._build_battle_state(battle, formatted_state)
 
         # Run main battle graph
-        result = self.battle_graph.invoke(initial_state)
+        result = await asyncio.to_thread(self.battle_graph.invoke, initial_state)
 
         # Store reasoning for battle history
         reasoning = result.get("reasoning")
@@ -149,7 +149,7 @@ class TailGlowPlayer(Player):
         }
 
         try:
-            result = self.team_analysis_graph.invoke(analysis_state)
+            result = await asyncio.to_thread(self.team_analysis_graph.invoke, analysis_state)
             team_analysis = result.get("team_analysis")
 
             if team_analysis:

@@ -16,6 +16,13 @@ class Config:
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     ANTHROPIC_MODEL: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
+    # LLM rate limiting
+    # Keep this below the org limit so two local bots do not collectively burst over it.
+    LLM_INPUT_TOKENS_PER_MINUTE: int = int(os.getenv("LLM_INPUT_TOKENS_PER_MINUTE", "25000"))
+    LLM_RATE_LIMIT_ENABLED: bool = os.getenv("LLM_RATE_LIMIT_ENABLED", "true").lower() == "true"
+    LLM_RATE_LIMIT_RETRIES: int = int(os.getenv("LLM_RATE_LIMIT_RETRIES", "2"))
+    LLM_RATE_LIMIT_RETRY_DELAY_SECONDS: float = float(os.getenv("LLM_RATE_LIMIT_RETRY_DELAY_SECONDS", "30"))
+
     # Ollama Settings
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
