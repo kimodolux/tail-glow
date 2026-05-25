@@ -195,7 +195,6 @@ class TailGlowPlayer(Player):
             # Battle history context
             "turn_reasoning": turn_reasoning,
             "battle_log_context": None,
-            "strategy_analysis": None,
             # Team state tracking
             "teams_state": teams_state,
             # Game memory (persists across turns)

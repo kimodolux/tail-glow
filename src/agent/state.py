@@ -49,7 +49,6 @@ class AgentState(TypedDict):
     # --- Battle history ---
     turn_reasoning: Optional[dict[int, str]]  # {turn: reasoning} from previous turns
     battle_log_context: Optional[str]  # Formatted battle log for prompts
-    strategy_analysis: Optional[str]  # LLM analysis of battle progress
 
     # --- Parallel node outputs ---
     opponent_sets: dict[str, Any]  # Randbats data for opponent Pokemon
@@ -59,24 +58,10 @@ class AgentState(TypedDict):
     speed_calc_raw: Optional[dict[str, Any]]  # Raw speed calc data
     type_matchups: Optional[str]  # Offensive/defensive matchups
     effects_analysis: Optional[str]  # Relevant item/ability/move effects
+    mechanics_context: Optional[str]  # Per-turn dynamic mechanics chunks (weather, hazards, etc.)
     strategy_context: Optional[str]  # RAG retrieval results
 
     # --- Self-learning ---
     general_strategy: Optional[str]  # Core strategy document content
     turn_mistakes: Optional[list]  # Mistakes detected on the previous turn
     accumulated_mistakes: Optional[list]  # All mistakes accumulated during the game
-
-    # --- Opponent prediction ---
-    opponent_prediction: Optional[dict]  # Full prediction distribution with per-action reasoning
-    # Structure:
-    # {
-    #     "moves": {
-    #         "Ice Beam": {"probability": 0.45, "reasoning": "Super effective STAB"},
-    #         "Thunderbolt": {"probability": 0.20, "reasoning": "Good neutral coverage"},
-    #     },
-    #     "switches": {
-    #         "Ferrothorn": {"probability": 0.15, "reasoning": "Resists our STAB"},
-    #     },
-    #     "top_prediction": {"action": "Ice Beam", "probability": 0.45, "reasoning": "..."},
-    # }
-    turn_predictions: Optional[dict[int, dict]]  # {turn: prediction} for accuracy

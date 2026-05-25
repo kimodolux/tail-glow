@@ -1,13 +1,48 @@
 """Damage calculator module using poke-env's built-in damage calculation."""
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from poke_env.battle import Battle, Move, Pokemon
+from poke_env.battle import Battle, Move, Pokemon, PokemonType
 from poke_env.calc import calculate_damage
 from poke_env.data import GenData
 from poke_env.stats import compute_raw_stats
+
+
+def _move_matches_tera(move: Move, tera_type: PokemonType) -> bool:
+    """Whether a move should be re-calculated under tera.
+
+    Tera Blast is always included — when teraed, poke-env's calc resolves its
+    type to the user's tera type, so the move gains STAB. Other moves are
+    included only if their declared type already matches the tera type
+    (so they gain new STAB or stack existing STAB to 2.0x post-tera).
+    """
+    if move.id == "terablast":
+        return True
+    return move.type == tera_type
+
+
+@contextlib.contextmanager
+def _tera_context(pokemon: Pokemon, tera_type: PokemonType):
+    """Temporarily flip `pokemon` into its terastallized state for one calc.
+
+    poke-env's `calculate_damage` reads tera state directly off the Pokemon
+    (no parameter for it), so this is the only way to get post-tera numbers.
+    We also temporarily set `_terastallized_type` since poke-env doesn't
+    always populate it from the Showdown request (it only reads `tera:` from
+    the `details` string, missing the top-level `teraType` field).
+    """
+    original_flag = pokemon._terastallized
+    original_type = pokemon._terastallized_type
+    pokemon._terastallized = True
+    pokemon._terastallized_type = tera_type
+    try:
+        yield
+    finally:
+        pokemon._terastallized = original_flag
+        pokemon._terastallized_type = original_type
 
 if TYPE_CHECKING:
     from src.battle import TeamsState
@@ -39,6 +74,7 @@ class MatchupResult:
     defender: str
     defender_hp_percent: float
     results: List[DamageResult]
+    tera_type_label: Optional[str] = None  # set when this matchup is a tera variant
 
 
 class DamageCalculator:
@@ -220,6 +256,139 @@ class DamageCalculator:
 
         return matchups
 
+    def _tera_skip_reason(self, battle: Battle) -> Optional[str]:
+        """Return None if tera calcs should run, else a human-readable reason."""
+        if not battle.active_pokemon or not battle.opponent_active_pokemon:
+            return "no active pokemon"
+        if not getattr(battle, "can_tera", False):
+            return f"battle.can_tera is False (active={battle.active_pokemon.species})"
+        if self._resolve_our_tera_type(battle) is None:
+            return f"tera_type unresolved (active={battle.active_pokemon.species})"
+        return None
+
+    def _resolve_our_tera_type(self, battle: Battle) -> Optional[PokemonType]:
+        """Get our active pokemon's tera type, falling back to last_request.
+
+        poke-env only parses tera from the `details` string. Modern Showdown
+        also exposes it as a top-level `teraType` field on each pokemon in the
+        request — read that when the parsed value is missing.
+        """
+        active = battle.active_pokemon
+        if active is None:
+            return None
+        if active.tera_type is not None:
+            return active.tera_type
+
+        last_request = getattr(battle, "last_request", None)
+        if not last_request:
+            return None
+        side = last_request.get("side", {}) if isinstance(last_request, dict) else {}
+        for entry in side.get("pokemon", []) or []:
+            if not entry.get("active"):
+                continue
+            tera_str = entry.get("teraType") or entry.get("tera_type")
+            if not tera_str:
+                continue
+            try:
+                return PokemonType.from_name(tera_str)
+            except Exception:
+                logger.warning(f"Failed to parse teraType={tera_str!r} from request")
+                return None
+        return None
+
+    def calculate_our_tera_moves_vs_active(
+        self, battle: Battle
+    ) -> Optional[MatchupResult]:
+        """Calculate damage for our available moves vs opponent active, as if we Tera'd.
+
+        Only included if Tera is still available and we know our tera type. Filters
+        to moves whose post-tera type matches the tera type (Tera Blast is always
+        included since its type becomes the tera type when used while teraed).
+        """
+        skip = self._tera_skip_reason(battle)
+        if skip is not None:
+            logger.info(f"Tera offensive calc skipped: {skip}")
+            return None
+        tera_type = self._resolve_our_tera_type(battle)
+
+        attacker = battle.active_pokemon
+        defender = battle.opponent_active_pokemon
+
+        self._ensure_pokemon_stats(attacker, battle)
+        self._ensure_pokemon_stats(defender, battle)
+
+        relevant_moves = [
+            m for m in battle.available_moves if _move_matches_tera(m, tera_type)
+        ]
+        if not relevant_moves:
+            return None
+
+        results: List[DamageResult] = []
+        with _tera_context(attacker, tera_type):
+            for move in relevant_moves:
+                variant_results = self._calculate_with_variants(
+                    attacker, defender, move, battle,
+                    is_estimated=False,
+                    vary_defender=True,
+                )
+                results.extend(variant_results)
+
+        if not results:
+            return None
+
+        return MatchupResult(
+            attacker=attacker.species,
+            defender=defender.species,
+            defender_hp_percent=defender.current_hp_fraction * 100,
+            results=results,
+            tera_type_label=tera_type.name.title(),
+        )
+
+    def calculate_their_moves_vs_us_when_tera(
+        self, battle: Battle
+    ) -> Optional[MatchupResult]:
+        """Calculate opponent's damage vs us, as if WE Tera'd (our defensive typing changes).
+
+        Same shape as `calculate_their_moves_vs_us` but with our active mon's
+        terastallized flag flipped on for the duration of the calcs.
+        """
+        skip = self._tera_skip_reason(battle)
+        if skip is not None:
+            logger.info(f"Tera defensive calc skipped: {skip}")
+            return None
+        tera_type = self._resolve_our_tera_type(battle)
+
+        attacker = battle.opponent_active_pokemon
+        defender = battle.active_pokemon
+
+        self._ensure_pokemon_stats(attacker, battle)
+        self._ensure_pokemon_stats(defender, battle)
+
+        moves_data = self._get_opponent_moves(attacker)
+
+        results: List[DamageResult] = []
+        with _tera_context(defender, tera_type):
+            for move_id, is_estimated in moves_data:
+                move = self._get_move(move_id)
+                if move:
+                    variant_results = self._calculate_with_variants(
+                        attacker, defender, move, battle,
+                        is_estimated=is_estimated,
+                        vary_attacker=True,
+                    )
+                    results.extend(variant_results)
+
+        if not results:
+            return None
+
+        return MatchupResult(
+            attacker=attacker.species,
+            defender=defender.species,
+            defender_hp_percent=defender.current_hp_fraction * 100,
+            results=results,
+            tera_type_label=tera_type.name.title(),
+        )
+
     def _calculate_single(
         self,
         attacker: Pokemon,
@@ -307,28 +476,32 @@ class DamageCalculator:
         if vary_attacker and self.teams_state:
             state = self.teams_state.get_pokemon_state(attacker.species, is_opponent=True)
             if state:
+                items = self._narrow_items(state)
+                abilities = self._narrow_abilities(state)
                 if state.revealed_item:
                     attacker_items = [state.revealed_item]
-                elif state.possible_items:
-                    attacker_items = [self._normalize_item(i) for i in state.possible_items]
+                elif items:
+                    attacker_items = [self._normalize_item(i) for i in items]
 
                 if state.revealed_ability:
                     attacker_abilities = [self._normalize_ability(state.revealed_ability)]
-                elif state.possible_abilities:
-                    attacker_abilities = [self._normalize_ability(a) for a in state.possible_abilities]
+                elif abilities:
+                    attacker_abilities = [self._normalize_ability(a) for a in abilities]
 
         if vary_defender and self.teams_state:
             state = self.teams_state.get_pokemon_state(defender.species, is_opponent=True)
             if state:
+                items = self._narrow_items(state)
+                abilities = self._narrow_abilities(state)
                 if state.revealed_item:
                     defender_items = [state.revealed_item]
-                elif state.possible_items:
-                    defender_items = [self._normalize_item(i) for i in state.possible_items]
+                elif items:
+                    defender_items = [self._normalize_item(i) for i in items]
 
                 if state.revealed_ability:
                     defender_abilities = [self._normalize_ability(state.revealed_ability)]
-                elif state.possible_abilities:
-                    defender_abilities = [self._normalize_ability(a) for a in state.possible_abilities]
+                elif abilities:
+                    defender_abilities = [self._normalize_ability(a) for a in abilities]
 
         # Store original values to restore later
         original_attacker_item = attacker._item
@@ -534,6 +707,18 @@ class DamageCalculator:
         except Exception as e:
             logger.debug(f"Failed to estimate stats for {pokemon.species}: {e}")
 
+    def _narrow_items(self, state) -> List[str]:
+        """Items consistent with the opponent's revealed moves, or full union."""
+        if self.randbats_data:
+            return state.narrowed_items(self.randbats_data)
+        return state.possible_items
+
+    def _narrow_abilities(self, state) -> List[str]:
+        """Abilities consistent with the opponent's revealed moves, or full union."""
+        if self.randbats_data:
+            return state.narrowed_abilities(self.randbats_data)
+        return state.possible_abilities
+
     def _get_opponent_moves(
         self, pokemon: Pokemon
     ) -> List[Tuple[str, bool]]:
@@ -559,13 +744,25 @@ class DamageCalculator:
         self, pokemon: Pokemon, existing_count: int
     ) -> List[Tuple[str, bool]]:
         """Estimate most threatening moves for a Pokemon based on its species."""
-        # Try randbats data first for more accurate move prediction
+        # Try randbats data first for more accurate move prediction. Use the
+        # role-narrowed move pool when available so revealed moves shrink the
+        # candidate set (e.g. seeing Dragon Dance locks Dragapult to the Tera
+        # Blast user's 4 moves rather than the union of all 3 roles).
+        possible_moves: Optional[set] = None
         if self.randbats_data:
-            possible_moves = self.randbats_data.get_possible_moves(pokemon.species)
-            if possible_moves:
-                return self._score_moves_from_pool(
-                    pokemon, possible_moves, existing_count
-                )
+            state = (
+                self.teams_state.get_pokemon_state(pokemon.species, is_opponent=True)
+                if self.teams_state else None
+            )
+            if state:
+                possible_moves = state.narrowed_moves(self.randbats_data)
+            else:
+                possible_moves = self.randbats_data.get_possible_moves(pokemon.species)
+
+        if possible_moves:
+            return self._score_moves_from_pool(
+                pokemon, possible_moves, existing_count
+            )
 
         # Fallback to learnset estimation
         species_id = pokemon.species.lower().replace("-", "").replace(" ", "")
@@ -672,6 +869,9 @@ def format_damage_calculations(
     our_vs_bench: List[MatchupResult],
     their_vs_us: Optional[MatchupResult],
     their_vs_bench: List[MatchupResult],
+    *,
+    our_tera_vs_active: Optional[MatchupResult] = None,
+    their_vs_us_when_tera: Optional[MatchupResult] = None,
 ) -> str:
     """Format damage calculation results for LLM consumption."""
     lines = []
@@ -701,6 +901,11 @@ def format_damage_calculations(
         for move, results in move_results.items():
             lines.append(_format_move_results(move, results, show_estimated=True))
         lines.append("")
+
+    # Tera option (only present if can_tera is True and tera type known)
+    tera_lines = _format_tera_section(our_tera_vs_active, their_vs_us_when_tera)
+    if tera_lines:
+        lines.extend(tera_lines)
 
     # Our moves vs opponent bench (summarized)
     if our_vs_bench:
@@ -770,6 +975,44 @@ def _format_move_results(
             parts.append(f"{r.min_percent}-{r.max_percent}%{ko_str} {assumption_str}".strip())
         est_str = " (estimated)" if show_estimated and results[0].is_estimated else ""
         return f"- {_format_move(move)}: {' | '.join(parts)}{est_str}"
+
+
+def _format_tera_section(
+    our_tera_vs_active: Optional[MatchupResult],
+    their_vs_us_when_tera: Optional[MatchupResult],
+) -> List[str]:
+    """Render the Tera Option subsection, or [] if nothing to show."""
+    has_offensive = bool(our_tera_vs_active and our_tera_vs_active.results)
+    has_defensive = bool(their_vs_us_when_tera and their_vs_us_when_tera.results)
+    if not has_offensive and not has_defensive:
+        return []
+
+    # Tera type label comes from whichever side has it set
+    tera_label = None
+    if our_tera_vs_active and our_tera_vs_active.tera_type_label:
+        tera_label = our_tera_vs_active.tera_type_label
+    elif their_vs_us_when_tera and their_vs_us_when_tera.tera_type_label:
+        tera_label = their_vs_us_when_tera.tera_type_label
+
+    lines: List[str] = []
+    header = "### Tera Option"
+    if tera_label:
+        header += f" — Tera Type: {tera_label} (still available)"
+    lines.append(header)
+
+    if has_offensive:
+        lines.append("**If you Tera (offensive STAB-boosted):**")
+        for move, results in _group_by_move(our_tera_vs_active.results).items():
+            lines.append(_format_move_results(move, results))
+
+    if has_defensive:
+        type_phrase = f" — your typing becomes {tera_label}" if tera_label else ""
+        lines.append(f"**If you Tera (defensive{type_phrase}):**")
+        for move, results in _group_by_move(their_vs_us_when_tera.results).items():
+            lines.append(_format_move_results(move, results, show_estimated=True))
+
+    lines.append("")
+    return lines
 
 
 def _format_assumptions(result: DamageResult) -> str:

@@ -1846,3 +1846,209 @@ def get_item_effect(item_id: str) -> Optional[str]:
 def get_move_effect(move_id: str) -> Optional[str]:
     """Get effect description for a move."""
     return MOVE_EFFECTS.get(move_id.lower().replace(" ", "").replace("-", ""))
+
+
+# Decision rules for status / utility moves. Tells the decide_action LLM
+# when to actually use a move whose value isn't captured by raw damage math.
+# Rules are only injected into the prompt when the move is in available_moves,
+# so this dict can grow without bloating per-turn tokens.
+STATUS_MOVE_RULES: dict[str, str] = {
+    # Hazard setting
+    "stealthrock": (
+        "SET IF: hazards not yet set, opponent has no known Defog/Rapid Spin, "
+        "you are not in KO danger this turn. "
+        "SKIP IF: opponent can KO before you move."
+    ),
+    "spikes": (
+        "SET IF: opponent has no known hazard removal, you are safe this turn, "
+        "fewer than 3 layers already set. "
+        "SKIP IF: opponent can KO before you move."
+    ),
+    "toxicspikes": (
+        "SET IF: opponent has no Poison types (they absorb toxic spikes), "
+        "no known hazard removal, safe this turn. "
+        "SKIP IF: opponent has a Poison type active or on team."
+    ),
+    "stickyweb": (
+        "SET IF: opponent has no known hazard removal, you are safe this turn. "
+        "SKIP IF: opponent can KO before you move."
+    ),
+
+    # Hazard removal
+    "rapidspin": (
+        "USE IF: we have hazards on our side hurting our team, "
+        "you can move before opponent or survive their hit. "
+        "SKIP IF: no hazards on our side."
+    ),
+    "defog": (
+        "USE IF: we have hazards on our side hurting our team. "
+        "NOTE: also removes opponent hazards — only use if our hazards "
+        "are hurting us more than theirs are hurting them."
+    ),
+
+    # Setup moves
+    "swordsdance": (
+        "SET UP IF: opponent predicted to switch (70%+), "
+        "you take less than 40% from their best move, already at less than +2. "
+        "SKIP IF: opponent has Roar/Whirlwind, can KO you, or you have no "
+        "physical moves to use the boost."
+    ),
+    "calmmind": (
+        "SET UP IF: opponent predicted to switch (70%+), "
+        "you take less than 40% from their best move, already at less than +2. "
+        "SKIP IF: opponent has Roar/Whirlwind, can KO you, or you have no "
+        "special moves to use the boost."
+    ),
+    "nastyplot": (
+        "SET UP IF: opponent predicted to switch (70%+), "
+        "you take less than 40% from their best move, already at less than +2. "
+        "SKIP IF: opponent can KO you or you have no special moves to use the boost."
+    ),
+    "dragondance": (
+        "SET UP IF: opponent predicted to switch (70%+), "
+        "you take less than 40% from their best move, already at less than +2. "
+        "SKIP IF: opponent has Roar/Whirlwind or can KO you."
+    ),
+    "quiverdance": (
+        "SET UP IF: opponent predicted to switch (70%+), "
+        "you take less than 40% from their best move. "
+        "SKIP IF: opponent can KO you."
+    ),
+    "bulkup": (
+        "SET UP IF: opponent predicted to switch or using a special move, "
+        "you take less than 40% from their best physical move. "
+        "SKIP IF: opponent is a special attacker — bulk up does not help."
+    ),
+    "coil": (
+        "SET UP IF: opponent predicted to switch, "
+        "you take less than 40% from their best move. "
+        "SKIP IF: opponent can KO you."
+    ),
+
+    # Status inflicting
+    "thunderwave": (
+        "USE IF: opponent outspeeds you and threatens damage, "
+        "opponent is not an Electric or Ground type. "
+        "SKIP IF: opponent is already statused, is Electric or Ground type, "
+        "or you can KO instead."
+    ),
+    "willowisp": (
+        "USE IF: opponent is a physical attacker (halves their Attack), "
+        "opponent is not a Fire type. "
+        "SKIP IF: opponent is already burned, is Fire type, or you can KO instead."
+    ),
+    "toxic": (
+        "USE IF: opponent is a wall or tank you cannot KO quickly, "
+        "applying pressure to force switches. "
+        "SKIP IF: opponent is Poison or Steel type, already statused, "
+        "or you can KO instead."
+    ),
+    "sleeppowder": (
+        "USE IF: opponent is a major threat you cannot KO, "
+        "only one Pokemon can be asleep at a time. "
+        "SKIP IF: opponent already has a status condition."
+    ),
+    "spore": (
+        "USE IF: opponent is a major threat you cannot KO. "
+        "SKIP IF: opponent already has a status condition or is a Grass type."
+    ),
+
+    # Recovery
+    "roost": (
+        "USE IF: you are below 50% HP and opponent cannot KO you this turn. "
+        "SKIP IF: opponent can 2HKO you even at full HP — recovery buys nothing. "
+        "SKIP IF: a teammate has a better matchup — switch instead."
+    ),
+    "recover": (
+        "USE IF: you are below 50% HP and opponent cannot KO you this turn. "
+        "SKIP IF: opponent can 2HKO you even at full HP. "
+        "SKIP IF: a teammate has a better matchup — switch instead."
+    ),
+    "synthesis": (
+        "USE IF: you are below 50% HP and opponent cannot KO you this turn. "
+        "NOTE: heals less in sand/rain/hail — factor in weather. "
+        "SKIP IF: opponent can 2HKO you even at full HP."
+    ),
+    "moonlight": (
+        "USE IF: you are below 50% HP and opponent cannot KO you this turn. "
+        "NOTE: heals less in sand/rain/hail — factor in weather. "
+        "SKIP IF: opponent can 2HKO you even at full HP."
+    ),
+    "slackoff": (
+        "USE IF: you are below 50% HP and opponent cannot KO you this turn. "
+        "SKIP IF: opponent can 2HKO you even at full HP."
+    ),
+    "softboiled": (
+        "USE IF: you are below 50% HP and opponent cannot KO you this turn. "
+        "SKIP IF: opponent can 2HKO you even at full HP."
+    ),
+
+    # Screens
+    "lightscreen": (
+        "SET IF: opponent has strong special attackers not yet checked, "
+        "you are not in immediate KO danger. "
+        "SKIP IF: screen is already active or opponent is primarily physical."
+    ),
+    "reflect": (
+        "SET IF: opponent has strong physical attackers not yet checked, "
+        "you are not in immediate KO danger. "
+        "SKIP IF: screen is already active or opponent is primarily special."
+    ),
+    "auroraveil": (
+        "SET IF: hail or snow is active, opponent has strong attackers on both sides. "
+        "SKIP IF: screen is already active or weather is not hail/snow."
+    ),
+
+    # Pivots
+    "uturn": (
+        "USE IF: you are at a type disadvantage and have a better switch-in, "
+        "or opponent is predicted to switch (maintain momentum). "
+        "SKIP IF: you can KO opponent this turn — take the KO instead. "
+        "SKIP IF: all remaining teammates are also at a disadvantage."
+    ),
+    "voltswitch": (
+        "USE IF: you are at a type disadvantage and have a better switch-in, "
+        "or opponent is predicted to switch (maintain momentum). "
+        "SKIP IF: you can KO opponent this turn. "
+        "SKIP IF: opponent is a Ground type — Volt Switch will fail."
+    ),
+    "flipturn": (
+        "USE IF: you are at a type disadvantage and have a better switch-in. "
+        "SKIP IF: you can KO opponent this turn — take the KO instead."
+    ),
+    "partingshot": (
+        "USE IF: you are at a type disadvantage, lowers their Attack and Sp. Atk on exit. "
+        "SKIP IF: you can KO opponent this turn."
+    ),
+
+    # Misc strategic
+    "substitute": (
+        "USE IF: opponent predicted to switch, you are above 25% HP, "
+        "you have a setup move to use behind the sub. "
+        "SKIP IF: below 25% HP or opponent has a move that hits through substitute."
+    ),
+    "encore": (
+        "USE IF: opponent just used a setup move or non-damaging move, "
+        "locks them into a move you can exploit. "
+        "SKIP IF: opponent used a damaging move last turn."
+    ),
+    "taunt": (
+        "USE IF: opponent is a wall or support Pokemon using status/recovery moves. "
+        "SKIP IF: opponent is a physical or special attacker — taunt has no effect."
+    ),
+    "knockoff": (
+        "PREFER IF: opponent has a known useful item (Choice item, Life Orb, Eviolite). "
+        "NOTE: 1.5x power if opponent is holding an item — use early before item is removed. "
+        "DOWNGRADE IF: opponent item already removed."
+    ),
+    "trickroom": (
+        "SET IF: your team has slow Pokemon that benefit, "
+        "opponent does not have a faster Trick Room setter. "
+        "NOTE: also removes existing Trick Room — use carefully if TR is already active."
+    ),
+}
+
+
+def get_status_move_rule(move_id: str) -> Optional[str]:
+    """Get the decision rule for a status/utility move, if any."""
+    return STATUS_MOVE_RULES.get(move_id.lower().replace(" ", "").replace("-", ""))

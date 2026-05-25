@@ -123,52 +123,6 @@ class GameMemory:
         if prediction.lower() in outcome.lower():
             self.correct_predictions += 1
 
-    def record_structured_prediction(
-        self, turn: int, prediction: dict, outcome: str
-    ) -> None:
-        """Record and evaluate a structured prediction distribution.
-
-        Args:
-            turn: Turn number
-            prediction: Dict with moves, switches, top_prediction, reasoning
-            outcome: What opponent actually did (e.g., "move:Ice Beam")
-        """
-        self.total_predictions += 1
-
-        # Extract action name from outcome (e.g., "move:Ice Beam" → "Ice Beam")
-        outcome_action = outcome.split(":", 1)[1] if ":" in outcome else outcome
-        outcome_norm = self._normalize_action(outcome_action)
-
-        # Check if top prediction was correct
-        top = prediction.get("top_prediction", {})
-        top_action = top.get("action", "")
-        top_action_norm = self._normalize_action(top_action)
-
-        if top_action_norm and top_action_norm in outcome_norm:
-            self.correct_predictions += 1
-
-        # Store for history (use top prediction for display)
-        self.predictions[turn] = top_action or "unknown"
-        self.outcomes[turn] = outcome_action
-
-        # Log probability assigned to actual outcome (for calibration analysis)
-        # Structure: {"action": {"probability": 0.45, "reasoning": "..."}}
-        all_actions = {**prediction.get("moves", {}), **prediction.get("switches", {})}
-        for action, data in all_actions.items():
-            action_norm = self._normalize_action(action)
-            if action_norm in outcome_norm:
-                # Handle both new dict structure and legacy float
-                if isinstance(data, dict):
-                    prob = data.get("probability", 0)
-                    reasoning = data.get("reasoning", "")
-                else:
-                    prob = data
-                    reasoning = ""
-                logger.info(
-                    f"Turn {turn}: assigned {prob*100:.0f}% to actual action '{outcome_action}'"
-                    f"{f' ({reasoning})' if reasoning else ''}"
-                )
-                break
 
     def _normalize_action(self, action: str) -> str:
         """Normalize action name for comparison."""

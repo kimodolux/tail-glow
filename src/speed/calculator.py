@@ -253,9 +253,19 @@ class SpeedCalculator:
         if pokemon.item and pokemon.item.lower() not in ['', 'unknown']:
             return 'scarf' in pokemon.item.lower() or 'choicescarf' in pokemon.item.lower().replace(" ", "")
 
-        # Check randbats data for possible items
+        # Check randbats data for possible items, narrowed by revealed moves
+        # so e.g. a revealed Dragon Dance rules out the Choice Specs role.
         if self.randbats_data:
-            possible_items = self.randbats_data.get_possible_items(pokemon.species)
+            revealed = list(pokemon.moves.keys()) if pokemon.moves else []
+            compatible_roles = self.randbats_data.get_compatible_roles(
+                pokemon.species, revealed
+            )
+            if compatible_roles:
+                possible_items = [
+                    item for role in compatible_roles for item in role.items
+                ]
+            else:
+                possible_items = self.randbats_data.get_possible_items(pokemon.species)
             if possible_items:
                 return any('scarf' in item.lower() for item in possible_items)
 
@@ -270,10 +280,12 @@ class SpeedCalculator:
         """Get moves with non-zero priority."""
         priority_moves = []
         for move in moves:
-            if move.priority != 0:
+            # Pseudo-moves (recharge, etc.) lack a priority key in poke-env data.
+            priority = move.entry.get("priority", 0)
+            if priority != 0:
                 priority_moves.append(PriorityMove(
                     move_id=move.id,
-                    priority=move.priority,
+                    priority=priority,
                     is_estimated=is_estimated,
                 ))
         return sorted(priority_moves, key=lambda m: -m.priority)

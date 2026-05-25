@@ -12,7 +12,7 @@ from poke_env.battle import Battle, Pokemon
 from poke_env.data import GenData
 from poke_env.stats import compute_raw_stats
 
-from src.data.randbats import RandbatsData
+from src.data.randbats import RandbatsData, RandbatsRole
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,67 @@ class PokemonState:
         """Get moves that are possible but not yet revealed."""
         revealed_set = {m.lower().replace(" ", "").replace("-", "") for m in self.revealed_moves}
         return self.possible_moves - revealed_set
+
+    def compatible_roles(self, randbats: RandbatsData) -> List[RandbatsRole]:
+        """Roles whose move pool contains every revealed move."""
+        return randbats.get_compatible_roles(self.species, self.revealed_moves)
+
+    def narrowed_moves(self, randbats: RandbatsData) -> Set[str]:
+        """Possible moves restricted to roles still compatible with reveals.
+
+        Falls back to the full union when nothing has been revealed yet or
+        when no role matches (data mismatch — keeps callers safe).
+        """
+        roles = self.compatible_roles(randbats)
+        if not roles:
+            return self.possible_moves
+        narrowed: Set[str] = set()
+        for role in roles:
+            for move in role.moves:
+                narrowed.add(move.lower().replace(" ", "").replace("-", ""))
+        return narrowed
+
+    def narrowed_items(self, randbats: RandbatsData) -> List[str]:
+        """Possible items restricted to roles still compatible with reveals."""
+        roles = self.compatible_roles(randbats)
+        if not roles:
+            return self.possible_items
+        seen: Set[str] = set()
+        narrowed: List[str] = []
+        for role in roles:
+            for item in role.items:
+                if item not in seen:
+                    seen.add(item)
+                    narrowed.append(item)
+        return narrowed or self.possible_items
+
+    def narrowed_abilities(self, randbats: RandbatsData) -> List[str]:
+        """Possible abilities restricted to roles still compatible with reveals."""
+        roles = self.compatible_roles(randbats)
+        if not roles:
+            return self.possible_abilities
+        seen: Set[str] = set()
+        narrowed: List[str] = []
+        for role in roles:
+            for ability in role.abilities:
+                if ability not in seen:
+                    seen.add(ability)
+                    narrowed.append(ability)
+        return narrowed or self.possible_abilities
+
+    def narrowed_tera_types(self, randbats: RandbatsData) -> List[str]:
+        """Possible tera types restricted to roles still compatible with reveals."""
+        roles = self.compatible_roles(randbats)
+        if not roles:
+            return self.possible_tera_types
+        seen: Set[str] = set()
+        narrowed: List[str] = []
+        for role in roles:
+            for tera in role.tera_types:
+                if tera not in seen:
+                    seen.add(tera)
+                    narrowed.append(tera)
+        return narrowed or self.possible_tera_types
 
 
 class TeamsState:

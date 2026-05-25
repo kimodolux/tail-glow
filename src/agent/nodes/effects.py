@@ -6,7 +6,13 @@ from typing import Optional
 from poke_env.battle import Battle, Move
 
 from ..state import AgentState
-from src.data.effects import get_item_effect, get_ability_effect, get_move_effect
+from src.data.effects import (
+    get_item_effect,
+    get_ability_effect,
+    get_move_effect,
+    get_status_move_rule,
+)
+from src.rag.mechanics_resolver import resolve_mechanics
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +26,7 @@ def get_effects_node(state: AgentState) -> dict:
     battle = state.get("battle_object")
     if not battle or not battle.active_pokemon or not battle.opponent_active_pokemon:
         logger.warning("No active Pokemon in state, skipping effects lookup")
-        return {"effects_analysis": None}
+        return {"effects_analysis": None, "mechanics_context": None}
 
     try:
         our_pokemon = battle.active_pokemon
@@ -34,12 +40,17 @@ def get_effects_node(state: AgentState) -> dict:
             opponent_sets,
         )
 
+        mechanics_text = resolve_mechanics(effects_text, battle)
+
         logger.info("Effects analysis compiled successfully")
-        return {"effects_analysis": effects_text}
+        return {
+            "effects_analysis": effects_text,
+            "mechanics_context": mechanics_text or None,
+        }
 
     except Exception as e:
         logger.error(f"Effects lookup failed: {e}", exc_info=True)
-        return {"effects_analysis": None}
+        return {"effects_analysis": None, "mechanics_context": None}
 
 
 def _compile_effects(
@@ -88,6 +99,21 @@ def _compile_effects(
         lines.append("")
         lines.append("**Your Move Effects:**")
         lines.extend(move_effects)
+
+    # Decision rules for any status/utility moves the user has available.
+    # Only included for moves actually in available_moves so we don't bloat tokens.
+    decision_rules = []
+    for move in available_moves:
+        rule = get_status_move_rule(move.id)
+        if rule:
+            decision_rules.append(
+                f"- **{move.id.replace('-', ' ').title()}**: {rule}"
+            )
+
+    if decision_rules:
+        lines.append("")
+        lines.append("**Decision Rules for Your Moves:**")
+        lines.extend(decision_rules)
 
     # Opponent's effects
     lines.append("")
@@ -190,8 +216,10 @@ def _get_move_effect_summary(move: Move) -> Optional[str]:
     if move.force_switch:
         effects.append("forces switch")
 
-    if move.priority != 0:
-        effects.append(f"priority {'+' if move.priority > 0 else ''}{move.priority}")
+    # Pseudo-moves (recharge, etc.) lack a priority key in poke-env data.
+    priority = move.entry.get("priority", 0)
+    if priority != 0:
+        effects.append(f"priority {'+' if priority > 0 else ''}{priority}")
 
     if move.breaks_protect:
         effects.append("breaks Protect")

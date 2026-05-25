@@ -37,15 +37,21 @@ def calculate_damage_node(state: AgentState) -> dict:
         our_vs_bench = calculator.calculate_our_moves_vs_bench(battle)
         their_vs_us = calculator.calculate_their_moves_vs_us(battle)
         their_vs_bench = calculator.calculate_their_moves_vs_bench(battle)
+        our_tera_vs_active = calculator.calculate_our_tera_moves_vs_active(battle)
+        their_vs_us_when_tera = calculator.calculate_their_moves_vs_us_when_tera(battle)
 
         logger.info(f"Damage calc - our_vs_active: {our_vs_active}")
         logger.info(f"Damage calc - our_vs_bench: {our_vs_bench}")
         logger.info(f"Damage calc - their_vs_us: {their_vs_us}")
         logger.info(f"Damage calc - their_vs_bench: {their_vs_bench}")
+        logger.info(f"Damage calc - our_tera_vs_active: {our_tera_vs_active}")
+        logger.info(f"Damage calc - their_vs_us_when_tera: {their_vs_us_when_tera}")
 
         # Format damage calculations
         damage_text = format_damage_calculations(
-            our_vs_active, our_vs_bench, their_vs_us, their_vs_bench
+            our_vs_active, our_vs_bench, their_vs_us, their_vs_bench,
+            our_tera_vs_active=our_tera_vs_active,
+            their_vs_us_when_tera=their_vs_us_when_tera,
         )
 
         if damage_text.strip():
@@ -57,6 +63,8 @@ def calculate_damage_node(state: AgentState) -> dict:
                     "our_vs_bench": our_vs_bench,
                     "their_vs_us": their_vs_us,
                     "their_vs_bench": their_vs_bench,
+                    "our_tera_vs_active": our_tera_vs_active,
+                    "their_vs_us_when_tera": their_vs_us_when_tera,
                 },
             }
         else:

@@ -16,7 +16,7 @@ Usage:
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 import httpx
 
@@ -169,6 +169,35 @@ class RandbatsData:
             logger.warning(f"#### UNEXPECTED: No randbats items for '{species}' ####")
             return []
         return pokemon.items
+
+    def get_compatible_roles(
+        self, species: str, revealed_moves: Iterable[str]
+    ) -> List[RandbatsRole]:
+        """Return roles whose move pool contains every revealed move.
+
+        Use this to narrow set inference: as the opponent reveals moves, the
+        list of compatible roles shrinks, and item/ability/tera_type
+        possibilities shrink with it.
+
+        Returns all roles when no moves have been revealed yet, and an empty
+        list if no role contains all revealed moves (data mismatch — callers
+        should treat this as "no narrowing possible" and fall back).
+        """
+        pokemon = self.get_pokemon(species)
+        if not pokemon or not pokemon.roles:
+            return []
+
+        normalized_revealed = {self._normalize_move(m) for m in revealed_moves if m}
+
+        if not normalized_revealed:
+            return list(pokemon.roles.values())
+
+        compatible = []
+        for role in pokemon.roles.values():
+            role_moves = {self._normalize_move(m) for m in role.moves}
+            if normalized_revealed.issubset(role_moves):
+                compatible.append(role)
+        return compatible
 
     def _normalize_move(self, move: str) -> str:
         """Normalize move name to match poke-env format."""

@@ -72,17 +72,6 @@ def update_game_memory_node(state: AgentState) -> dict:
             f"{turn_event.our_action} vs {turn_event.opponent_action}"
         )
 
-        # Track prediction accuracy using structured predictions
-        turn_predictions = state.get("turn_predictions", {})
-        previous_prediction = turn_predictions.get(previous_turn)
-
-        if previous_prediction:
-            game_memory.record_structured_prediction(
-                turn=previous_turn,
-                prediction=previous_prediction,
-                outcome=turn_event.opponent_action,
-            )
-
     # Log memory stats periodically
     if turn % 5 == 0:
         stats = game_memory.get_summary_stats()

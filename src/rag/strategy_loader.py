@@ -13,9 +13,11 @@ logger = logging.getLogger(__name__)
 # Path to the general strategy documents directory
 GENERAL_STRATEGY_DIR = Path(__file__).parent.parent.parent / "docs" / "strategy" / "general"
 
-# Strategy files to load in order
+# Strategy files to load in order. Only the timeless / always-relevant docs
+# go here. Conditional mechanics (weather, terrain, hazards, screens, priority,
+# etc.) are loaded per-turn via src.rag.mechanics_resolver.
 STRATEGY_FILES = [
-    "mechanics.md",
+    "mechanics_core.md",
     "team_archetypes.md",
     "core_strategy.md",
 ]
