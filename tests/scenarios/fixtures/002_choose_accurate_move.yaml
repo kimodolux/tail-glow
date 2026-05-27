@@ -1,0 +1,32 @@
+# Lycanroc can KO with both Rock Slide and Smack Down
+# Rock Slide does more damage but has a 10% chance to miss
+# Seeing the KO with both, agent should prioritise higher accruacy
+name: "Lycanroc outspeed and KOs Charizard but has high powered, inaccurate move"
+player_team: |
+  Lycanroc @ Life Orb
+  Ability: Steadfast
+  Tera Type: Ghost
+  EVs: 252 Atk / 4 SpD / 252 Spe
+  Jolly Nature
+  - Rock Slide
+  - Feint Attack
+  - Smack Down
+  - Stealth Rock
+
+opponent_team: |
+  Charizard @ Choice Specs
+  Ability: Solar Power
+  EVs: 4 Def / 252 SpA / 252 Spe
+  Timid Nature
+  - Weather Ball
+  - Solar Beam
+  - Aura Sphere
+  - Flamethrower
+
+opponent_script:
+  - aurasphere
+
+evaluation:
+  type: move_match
+  turn: 1
+  expected: [smackdown]

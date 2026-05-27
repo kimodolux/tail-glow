@@ -66,6 +66,11 @@ def update_game_memory_node(state: AgentState) -> dict:
     turn_event = parse_turn_observation(obs, battle, previous_turn)
 
     if turn_event:
+        # Attach our stated reasoning from the previous turn so the LLM can
+        # see WHY each recent action was taken, not just WHAT happened.
+        turn_reasoning = state.get("turn_reasoning") or {}
+        turn_event.our_reasoning = turn_reasoning.get(previous_turn)
+
         game_memory.add_turn_event(turn_event)
         logger.debug(
             f"Added turn {previous_turn} to memory: "

@@ -183,7 +183,20 @@ class GameMemory:
         if event.their_ko:
             parts.append(f"[Lost {event.their_ko}]")
 
-        return " ".join(parts)
+        line = " ".join(parts)
+
+        if event.our_reasoning:
+            line += f"\n    Why: {self._summarize_reasoning(event.our_reasoning)}"
+
+        return line
+
+    @staticmethod
+    def _summarize_reasoning(reasoning: str, max_len: int = 160) -> str:
+        """Collapse multi-line reasoning into a single line, capped in length."""
+        one_line = " ".join(reasoning.split())
+        if len(one_line) > max_len:
+            one_line = one_line[: max_len - 1].rstrip() + "…"
+        return one_line
 
     def get_summary_stats(self) -> dict:
         """Get summary stats for debugging/logging."""

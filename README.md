@@ -93,6 +93,29 @@ To stop the server:
 cd infra && docker compose down
 ```
 
+## Scenario Testing
+
+Scripted scenarios pit the real agent against a deterministic opponent on
+the local Showdown server and grade the agent's chosen move against an
+expected answer. Useful for regression-testing prompt or graph changes and
+probing specific weaknesses (KO recognition, status-move usage, etc.).
+
+```bash
+# Start the local server (same one used for bot vs bot)
+cd infra && docker compose up -d && cd ..
+
+# Run the scenario suite
+uv run pytest -m scenario -v
+
+# Run a single scenario by name
+uv run pytest tests/test_scenarios.py -k "Pikachu KOs" -v
+```
+
+Scenarios live as YAML files in [tests/scenarios/fixtures/](tests/scenarios/fixtures/);
+see [tests/scenarios/README.md](tests/scenarios/README.md) for the author
+guide and full file format. Format is `gen9customgame`, so randbats / RAG
+lookups will be no-ops during scenario runs.
+
 ## Architecture
 
 ### Multi-Graph System
@@ -302,13 +325,23 @@ tail-glow/
 │
 ├── POKEMON_TEMPLATE.md        # Template for strategy docs
 └── tests/
+    ├── scenarios/             # Scripted agent-evaluation scenarios
+    │   ├── runner.py          # ScenarioRunner orchestration
+    │   ├── graders.py         # Pass/fail evaluation
+    │   ├── recording_player.py  # TailGlowPlayer wrapper that captures decisions
+    │   ├── scripted_player.py   # Deterministic opponent
+    │   └── fixtures/*.yaml    # Author one YAML per scenario
+    └── test_scenarios.py      # Pytest entry (gated by `scenario` marker)
 ```
 
 ## Development
 
 ```bash
-# Run tests
-uv run pytest tests/ -v
+# Fast unit tests (skips scenarios)
+uv run pytest -m "not scenario" -v
+
+# Run scenario suite (requires local Showdown server + LLM credentials)
+uv run pytest -m scenario -v
 
 # Format code
 uv run black src/ tests/

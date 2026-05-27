@@ -33,6 +33,9 @@ class ParsedTurnEvent:
     boosts_gained: dict[str, int] = field(default_factory=dict)
     boosts_opponent: dict[str, int] = field(default_factory=dict)
 
+    # Our stated reasoning for the action this turn (one-line summary)
+    our_reasoning: Optional[str] = None
+
 
 def parse_turn_observation(obs: Any, battle: Any, turn: int) -> Optional[ParsedTurnEvent]:
     """
