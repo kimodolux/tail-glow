@@ -173,7 +173,7 @@ Typical turn 1 uses team analysis plus decision. Later turns usually use turn an
 | `format_state` | Format battle state for display |
 | `update_game_memory` | Parse previous-turn events into per-game memory |
 | `update_teams_state` | Maintain cached stats, HP, status, boosts, and revealed team info |
-| `fetch_opponent_sets` | Get possible sets from randbats data |
+| `fetch_opponent_sets` | Get possible sets via the meta-aware [StatsResolver](#stats-resolution-meta-aware) (randbats for random formats, curated spreads otherwise) |
 | `calculate_damage` | Damage calculations for all moves |
 | `calculate_speed` | Speed comparison + priority analysis |
 | `get_type_matchups` | Offensive/defensive type effectiveness |
@@ -189,7 +189,7 @@ Accurate damage predictions using poke-env's damage calculation:
 - Your moves vs opponent (active + bench)
 - Opponent's threats to you
 - KO probability analysis
-- Random Battles accuracy (85 EVs, 31 IVs)
+- Stats come from the meta-aware [StatsResolver](#stats-resolution-meta-aware) — randbats spreads in Random Battles, curated Smogon priors in OU / customgame
 
 ### Speed Calculator
 
@@ -199,6 +199,65 @@ Determines turn order with support for:
 - Speed modifiers (paralysis, Choice Scarf, Tailwind, Trick Room)
 - Stat boosts
 - Priority move detection
+- Format-aware stat source (see [Stats Resolution](#stats-resolution-meta-aware))
+
+### Stats Resolution (Meta-Aware)
+
+Different metagames expose different amounts of information about each
+Pokemon's spread, so the agent dispatches stat lookups to a
+format-appropriate `StatsResolver` at battle start. Every consumer
+(`TeamsState`, `DamageCalculator`, `SpeedCalculator`, `fetch_opponent_sets`)
+goes through this single seam.
+
+| Format | Resolver | Own team | Opponent |
+|---|---|---|---|
+| `gen9randombattle`, `gen8randombattle`, etc. | `RandbatsResolver` | randbats spread (85-ish EVs, 31 IVs) | same — randbats spread per species |
+| `gen9ou`, `gen9customgame`, anything non-random | `NonRandomResolver` | trusts `pokemon.stats` from the server (exact EVs/nature applied) | curated prior from `src/data/smogon-common.json` → role-based fallback if uncovered |
+
+**Why this matters**: before this seam, every stat fell back to a hardcoded
+`[85, 85, 85, 85, 85, 85]` spread when randbats data was missing. That meant
+in a custom-team scenario the agent's own 252-SpA Pikachu was modeled as
+85-SpA, badly underestimating its own damage.
+
+**Curated priors (`src/data/smogon-common.json`)**: hand-picked common Smogon
+sets per Pokemon, used as the opponent's prior in non-random formats.
+Schema is documented in the file's `_schema` key. Add a new species:
+
+```json
+{
+  "pokemon": {
+    "garchomp": {
+      "spreads": [
+        {
+          "name": "Swords Dance",
+          "evs": {"hp": 0, "atk": 252, "def": 0, "spa": 0, "spd": 4, "spe": 252},
+          "ivs": {"hp": 31, "atk": 31, "def": 31, "spa": 31, "spd": 31, "spe": 31},
+          "nature": "jolly",
+          "level": 100,
+          "item": "lifeorb",
+          "ability": "roughskin",
+          "moves": ["swordsdance", "earthquake", "dragonclaw", "stoneedge"]
+        }
+      ],
+      "default_spread_idx": 0
+    }
+  }
+}
+```
+
+For species not in the file, `NonRandomResolver` falls back to a role-based
+heuristic: 252 EVs in each of the two highest base stats, 4 in the third,
+neutral nature. Better than 85-across-the-board but loses nature-driven
+speed tiers — populate the JSON for any Pokemon that matters to a scenario.
+
+**Per-scenario overrides**: scenario tests can pin a specific opponent
+spread per fixture via the `opponent_spreads` field in YAML — see
+[tests/scenarios/README.md](tests/scenarios/README.md#pinning-opponent-priors).
+
+**Phase 2 hook**: `CommonSpreadsDB.lookup_all(species)` returns the full
+candidate list (not just the default), so a future inference engine can
+narrow the posterior by eliminating spreads inconsistent with observed
+damage rolls. Not implemented yet.
 
 ### Type Matchup Analysis
 
@@ -291,14 +350,20 @@ tail-glow/
 │   │   └── teams_state.py     # Cached team state and revealed info
 │   │
 │   ├── damage_calc/
-│   │   └── calculator.py      # Damage calculations
+│   │   └── calculator.py      # Damage calculations (uses StatsResolver)
 │   │
 │   ├── speed/
-│   │   └── calculator.py      # Speed comparison logic
+│   │   └── calculator.py      # Speed comparison logic (uses StatsResolver)
+│   │
+│   ├── stats/                 # Meta-aware stat resolution
+│   │   ├── resolver.py        # StatsResolver protocol + Randbats/NonRandom impls
+│   │   ├── factory.py         # Format → resolver dispatch
+│   │   └── common_spreads.py  # Curated JSON loader + role-based fallback
 │   │
 │   ├── data/
-│   │   ├── randbats.py        # Random battles set data
-│   │   └── effects.py         # Curated competitive effects
+│   │   ├── randbats.py            # Random battles set data
+│   │   ├── effects.py             # Curated competitive effects
+│   │   └── smogon-common.json     # Curated opponent priors for non-random formats
 │   │
 │   ├── rag/
 │   │   ├── models.py          # Learned matchup/mistake data models
