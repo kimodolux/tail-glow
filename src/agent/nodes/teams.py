@@ -4,7 +4,9 @@ import logging
 
 from ..state import AgentState
 from src.battle import TeamsState
+from src.config import Config
 from src.data import get_randbats_data
+from src.stats import make_resolver
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,17 @@ def update_teams_state_node(state: AgentState) -> dict:
         if teams_state is None:
             # First turn - create new TeamsState
             logger.info("Creating new TeamsState for battle")
-            teams_state = TeamsState(gen=9, randbats_data=get_randbats_data())
+            randbats_data = get_randbats_data()
+            resolver = state.get("stats_resolver_override") or make_resolver(
+                Config.BATTLE_FORMAT, randbats_data
+            )
+            if state.get("stats_resolver_override") is not None:
+                logger.info("Using stats_resolver_override from state")
+            teams_state = TeamsState(
+                stats_resolver=resolver,
+                gen=9,
+                randbats_data=randbats_data,
+            )
 
         # Update from current battle state
         teams_state.update_from_battle(battle)

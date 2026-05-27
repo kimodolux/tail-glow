@@ -10,7 +10,8 @@ from typing import Any, Optional
 
 from poke_env.battle import Battle, Move, Pokemon, Status
 from poke_env.data import GenData
-from poke_env.stats import compute_raw_stats
+
+from src.stats import StatsResolver
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +61,11 @@ class SpeedAnalysis:
 class SpeedCalculator:
     """Calculate speed comparisons for battle decisions."""
 
-    def __init__(self, gen: int = 9, randbats_data=None):
+    def __init__(self, stats_resolver: StatsResolver, gen: int = 9, randbats_data=None):
         self.gen = gen
         self.gen_data = GenData.from_gen(gen)
         self.randbats_data = randbats_data
+        self.stats_resolver = stats_resolver
 
     def calculate_speed_matchup(
         self,
@@ -167,37 +169,11 @@ class SpeedCalculator:
         return self._estimate_speed(pokemon)
 
     def _estimate_speed(self, pokemon: Pokemon) -> int:
-        """Estimate speed stat from species data."""
-        species_id = pokemon.species.lower().replace("-", "").replace(" ", "")
-
-        # Try randbats data first
-        if self.randbats_data:
-            evs = self.randbats_data.get_evs(pokemon.species)
-            ivs = self.randbats_data.get_ivs(pokemon.species)
-            level = self.randbats_data.get_level(pokemon.species) or pokemon.level or 100
-        else:
-            # Randbats standard: 85 EVs, 31 IVs
-            evs = {"spe": 85}
-            ivs = {"spe": 31}
-            level = pokemon.level or 100
-
-        # Get species data
-        if species_id not in self.gen_data.pokedex:
-            base_species = species_id.split("-")[0] if "-" in pokemon.species else species_id
-            if base_species in self.gen_data.pokedex:
-                species_id = base_species
-            else:
-                return 100  # Default fallback
-
+        """Estimate speed stat via the StatsResolver."""
         try:
-            stat_order = ["hp", "atk", "def", "spa", "spd", "spe"]
-            evs_list = [evs.get(s, 84) for s in stat_order]
-            ivs_list = [ivs.get(s, 31) for s in stat_order]
-
-            raw_stats = compute_raw_stats(
-                species_id, evs_list, ivs_list, level, "hardy", self.gen_data
-            )
-            return raw_stats[5]  # Speed is index 5
+            spread = self.stats_resolver.get_spread(pokemon, is_opponent=True)
+            spe = spread.stats.get("spe") if spread.stats else None
+            return spe if spe else 100
         except Exception as e:
             logger.debug(f"Failed to estimate speed for {pokemon.species}: {e}")
             return 100

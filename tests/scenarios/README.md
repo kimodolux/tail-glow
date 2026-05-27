@@ -43,6 +43,7 @@ Drop a YAML file into `tests/scenarios/fixtures/`. Required fields:
 | `opponent_team` | Showdown export format — the scripted opponent's team |
 | `opponent_script` | List of move ids (lowercased, no spaces) the opponent plays in order. If exhausted or unavailable, falls back to the first available move. |
 | `evaluation` | Grading config — see below |
+| `opponent_spreads` | Optional — per-scenario opponent prior overrides. See "Pinning opponent priors" below. |
 
 Get the Showdown export string from the Teambuilder on
 play.pokemonshowdown.com → Teambuilder → "Import/Export".
@@ -60,6 +61,41 @@ evaluation:
 
 More evaluation types (outcome-based, multi-turn, reasoning-judge) are
 planned — see the project plan for the upgrade path.
+
+### Pinning opponent priors (`opponent_spreads`)
+
+In non-random formats the agent doesn't see the opponent's EVs/nature/item.
+It infers them from `src/data/smogon-common.json`; species not in that file
+fall back to a role-based heuristic with neutral nature. This can quietly
+break scenarios where nature flips a speed tier or item changes damage —
+e.g. a Timid Charizard's true 328 Spe vs. the neutral-nature default 299
+Spe.
+
+Override the prior per-scenario by adding an `opponent_spreads` block. The
+shape is identical to the `pokemon` section of `smogon-common.json`, and
+entries fully replace any same-species entries from the global file:
+
+```yaml
+opponent_spreads:
+  charizard:
+    spreads:
+      - name: Choice Specs
+        evs: {hp: 0, atk: 0, def: 4, spa: 252, spd: 0, spe: 252}
+        ivs: {hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31}
+        nature: timid
+        level: 100
+        item: choicespecs
+        ability: solarpower
+        moves: [weatherball, solarbeam, aurasphere, flamethrower]
+    default_spread_idx: 0
+```
+
+When this is present, the scenario runner builds a one-off `NonRandomResolver`
+with those entries merged on top of the global JSON and injects it via
+`AgentState.stats_resolver_override`. The agent then uses the pinned spread
+for stat/damage/speed calculations. The opponent's actual server-side team
+is still the team in `opponent_team` — `opponent_spreads` is purely the
+prior the agent reasons against.
 
 ## How it works
 

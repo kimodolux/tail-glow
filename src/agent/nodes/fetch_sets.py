@@ -1,4 +1,4 @@
-"""Fetch opponent sets node - retrieves randbats data for opponent Pokemon."""
+"""Fetch opponent sets node - retrieves stat-spread data for opponent Pokemon."""
 
 import logging
 from typing import Any
@@ -10,8 +10,11 @@ logger = logging.getLogger(__name__)
 
 def fetch_opponent_sets_node(state: AgentState) -> dict:
     """
-    Fetch randbats data for all seen opponent Pokemon.
-    Stores possible moves, items, abilities, and tera types in state.
+    Fetch spread/move/item/ability data for all seen opponent Pokemon via
+    the meta-aware StatsResolver. In random battles this returns the same
+    randbats-derived data as before; in OU/customgame it uses curated
+    Smogon-common spreads.
+
     Returns only the fields this node modifies to avoid concurrent write issues.
     """
     battle = state.get("battle_object")
@@ -20,39 +23,43 @@ def fetch_opponent_sets_node(state: AgentState) -> dict:
         return {"opponent_sets": {}}
 
     try:
+        from src.config import Config
         from src.data import get_randbats_data
+        from src.stats import make_resolver
 
-        randbats_data = get_randbats_data()
-        if not randbats_data:
-            logger.warning("No randbats data available")
-            return {"opponent_sets": {}}
+        teams_state = state.get("teams_state")
+        resolver = (
+            teams_state.stats_resolver
+            if teams_state is not None
+            else make_resolver(Config.BATTLE_FORMAT, get_randbats_data())
+        )
 
         opponent_sets: dict[str, Any] = {}
 
-        # Fetch data for all seen opponent Pokemon
-        for pokemon_id, pokemon in battle.opponent_team.items():
+        for _pokemon_id, pokemon in battle.opponent_team.items():
             species = pokemon.species
+            spread = resolver.get_spread(pokemon, is_opponent=True)
 
-            set_data = {
+            opponent_sets[species] = {
                 "species": species,
-                "possible_moves": randbats_data.get_possible_moves(species),
-                "possible_items": randbats_data.get_possible_items(species),
-                "possible_abilities": randbats_data.get_possible_abilities(species),
-                "evs": randbats_data.get_evs(species),
-                "ivs": randbats_data.get_ivs(species),
-                "level": randbats_data.get_level(species),
+                "possible_moves": set(spread.possible_moves),
+                "possible_items": list(spread.possible_items),
+                "possible_abilities": list(spread.possible_abilities),
+                "evs": dict(spread.evs),
+                "ivs": dict(spread.ivs),
+                "nature": spread.nature,
+                "level": spread.level,
                 # Track what we've actually seen
                 "revealed_moves": list(pokemon.moves.keys()) if pokemon.moves else [],
                 "revealed_item": pokemon.item if pokemon.item else None,
                 "revealed_ability": pokemon.ability if pokemon.ability else None,
             }
 
-            opponent_sets[species] = set_data
-
             logger.debug(
-                f"Fetched sets for {species}: "
-                f"{len(set_data['possible_moves'])} moves, "
-                f"{len(set_data['possible_items'])} items"
+                "Fetched sets for %s: %d possible_moves, %d possible_items",
+                species,
+                len(opponent_sets[species]["possible_moves"]),
+                len(opponent_sets[species]["possible_items"]),
             )
 
         logger.info(f"Fetched opponent sets for {len(opponent_sets)} Pokemon")

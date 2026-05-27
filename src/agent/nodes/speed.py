@@ -20,8 +20,21 @@ def calculate_speed_node(state: AgentState) -> dict:
     try:
         from src.speed import SpeedCalculator, format_speed_analysis
         from src.data import get_randbats_data
+        from src.config import Config
+        from src.stats import make_resolver
 
-        calculator = SpeedCalculator(gen=9, randbats_data=get_randbats_data())
+        teams_state = state.get("teams_state")
+        randbats_data = get_randbats_data()
+        resolver = (
+            teams_state.stats_resolver
+            if teams_state is not None
+            else make_resolver(Config.BATTLE_FORMAT, randbats_data)
+        )
+        calculator = SpeedCalculator(
+            stats_resolver=resolver,
+            gen=9,
+            randbats_data=randbats_data,
+        )
 
         # Get opponent sets from state (populated by fetch_sets_node)
         opponent_sets = state.get("opponent_sets", {})

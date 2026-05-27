@@ -65,3 +65,9 @@ class AgentState(TypedDict):
     general_strategy: Optional[str]  # Core strategy document content
     turn_mistakes: Optional[list]  # Mistakes detected on the previous turn
     accumulated_mistakes: Optional[list]  # All mistakes accumulated during the game
+
+    # --- Test / scenario hooks ---
+    # Pre-built StatsResolver to use instead of the default format-dispatched
+    # one. Scenario tests use this to pin a specific opponent prior per
+    # fixture without mutating the global smogon-common.json.
+    stats_resolver_override: Optional[Any]

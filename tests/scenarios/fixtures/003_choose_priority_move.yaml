@@ -24,7 +24,24 @@ opponent_team: |
   - Flamethrower
 
 opponent_script:
-  - aurasphere
+  - focusblast
+
+# Pin the agent's opponent prior to the actual Charizard set. Without this,
+# Charizard falls back to the role-based heuristic (neutral nature) and the
+# computed Spe is 299 instead of the real 328, which can confuse the speed
+# math the LLM does when reasoning about priority moves.
+opponent_spreads:
+  charizard:
+    spreads:
+      - name: Choice Specs
+        evs: {hp: 0, atk: 0, def: 4, spa: 252, spd: 0, spe: 252}
+        ivs: {hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31}
+        nature: timid
+        level: 100
+        item: choicespecs
+        ability: solarpower
+        moves: [weatherball, solarbeam, aurasphere, flamethrower]
+    default_spread_idx: 0
 
 evaluation:
   type: move_match

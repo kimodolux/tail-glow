@@ -10,9 +10,9 @@ from typing import Dict, List, Optional, Set
 
 from poke_env.battle import Battle, Pokemon
 from poke_env.data import GenData
-from poke_env.stats import compute_raw_stats
 
 from src.data.randbats import RandbatsData, RandbatsRole
+from src.stats import StatsResolver
 
 logger = logging.getLogger(__name__)
 
@@ -120,10 +120,16 @@ class PokemonState:
 class TeamsState:
     """Tracks both teams throughout the battle with cached stats."""
 
-    def __init__(self, gen: int = 9, randbats_data: Optional[RandbatsData] = None):
+    def __init__(
+        self,
+        stats_resolver: StatsResolver,
+        gen: int = 9,
+        randbats_data: Optional[RandbatsData] = None,
+    ):
         self.gen = gen
         self.gen_data = GenData.from_gen(gen)
         self.randbats_data = randbats_data
+        self.stats_resolver = stats_resolver
 
         self.our_team: Dict[str, PokemonState] = {}  # species -> state
         self.their_team: Dict[str, PokemonState] = {}  # species -> state
@@ -160,120 +166,33 @@ class TeamsState:
             self._update_revealed_info(state, pokemon)
 
     def _create_pokemon_state(self, pokemon: Pokemon, is_opponent: bool) -> PokemonState:
-        """Create a new PokemonState with calculated stats."""
+        """Create a new PokemonState by asking the stats resolver."""
         species = pokemon.species
         side = "opponent" if is_opponent else "our"
         logger.info(f"TeamsState: Creating state for {side} Pokemon '{species}'")
 
-        # Calculate stats from randbats data
-        level, stats = self._calculate_stats(pokemon)
+        spread = self.stats_resolver.get_spread(pokemon, is_opponent=is_opponent)
 
-        if not stats:
+        if not spread.stats:
             logger.warning(f"#### UNEXPECTED: Empty stats dict for '{species}' ####")
-
-        # Get possible options from randbats data
-        possible_moves: Set[str] = set()
-        possible_abilities: List[str] = []
-        possible_items: List[str] = []
-        possible_tera_types: List[str] = []
-
-        if self.randbats_data:
-            possible_moves = self.randbats_data.get_possible_moves(species)
-            possible_abilities = self.randbats_data.get_possible_abilities(species)
-            possible_items = self.randbats_data.get_possible_items(species)
-
-            # Get tera types from randbats data
-            randbats_pokemon = self.randbats_data.get_pokemon(species)
-            if randbats_pokemon:
-                for role in randbats_pokemon.roles.values():
-                    possible_tera_types.extend(role.tera_types)
-                possible_tera_types = list(set(possible_tera_types))  # Dedupe
-            else:
-                logger.warning(
-                    f"#### UNEXPECTED: No randbats pokemon data for '{species}' "
-                    f"when creating state ####"
-                )
         else:
-            logger.warning(
-                f"#### UNEXPECTED: No randbats_data when creating state for '{species}' ####"
+            logger.info(
+                f"TeamsState: stats for '{species}' (L{spread.level}): "
+                f"HP={spread.stats.get('hp')}, Atk={spread.stats.get('atk')}, "
+                f"Def={spread.stats.get('def')}, SpA={spread.stats.get('spa')}, "
+                f"SpD={spread.stats.get('spd')}, Spe={spread.stats.get('spe')} "
+                f"(exact={spread.stats_are_exact})"
             )
 
         return PokemonState(
             species=species,
-            level=level,
-            stats=stats,
-            possible_moves=possible_moves,
-            possible_abilities=possible_abilities,
-            possible_items=possible_items,
-            possible_tera_types=possible_tera_types,
+            level=spread.level,
+            stats=dict(spread.stats),
+            possible_moves=set(spread.possible_moves),
+            possible_abilities=list(spread.possible_abilities),
+            possible_items=list(spread.possible_items),
+            possible_tera_types=list(spread.possible_tera_types),
         )
-
-    def _calculate_stats(self, pokemon: Pokemon) -> tuple[int, Dict[str, int]]:
-        """Calculate stats using randbats data."""
-        species = pokemon.species
-        species_id = species.lower().replace("-", "").replace(" ", "")
-
-        # Handle species not in pokedex
-        if species_id not in self.gen_data.pokedex:
-            base_species = species_id.split("-")[0] if "-" in species else species_id
-            if base_species in self.gen_data.pokedex:
-                logger.info(f"TeamsState: '{species}' not in pokedex, using base '{base_species}'")
-                species_id = base_species
-            else:
-                # Fallback to pokemon's existing stats if available
-                logger.warning(
-                    f"#### UNEXPECTED: '{species}' not in pokedex and no base species found, "
-                    f"using pokemon.stats fallback ####"
-                )
-                return pokemon.level or 100, dict(pokemon.stats) if pokemon.stats else {}
-
-        # Get level/EVs/IVs from randbats data
-        if self.randbats_data:
-            randbats_level = self.randbats_data.get_level(species)
-            if randbats_level:
-                level = randbats_level
-                logger.debug(f"TeamsState: '{species}' using randbats level {level}")
-            else:
-                level = pokemon.level or 100
-                logger.warning(
-                    f"#### UNEXPECTED: No randbats level for '{species}', "
-                    f"using fallback level {level} ####"
-                )
-            evs_dict = self.randbats_data.get_evs(species)
-            ivs_dict = self.randbats_data.get_ivs(species)
-
-            stat_order = ["hp", "atk", "def", "spa", "spd", "spe"]
-            evs = [evs_dict[s] for s in stat_order]
-            ivs = [ivs_dict[s] for s in stat_order]
-        else:
-            level = pokemon.level or 100
-            evs = [85, 85, 85, 85, 85, 85]
-            ivs = [31, 31, 31, 31, 31, 31]
-            logger.warning(
-                f"#### UNEXPECTED: No randbats_data available for '{species}', "
-                f"using fallback level={level}, EVs=85, IVs=31 ####"
-            )
-
-        raw_stats = compute_raw_stats(
-            species_id, evs, ivs, level, "hardy", self.gen_data
-        )
-
-        stats = {
-            "hp": raw_stats[0],
-            "atk": raw_stats[1],
-            "def": raw_stats[2],
-            "spa": raw_stats[3],
-            "spd": raw_stats[4],
-            "spe": raw_stats[5],
-        }
-
-        logger.info(
-            f"TeamsState: Calculated stats for '{species}' (L{level}): "
-            f"HP={stats['hp']}, Atk={stats['atk']}, Def={stats['def']}, "
-            f"SpA={stats['spa']}, SpD={stats['spd']}, Spe={stats['spe']}"
-        )
-
-        return level, stats
 
     def _update_dynamic_state(self, state: PokemonState, pokemon: Pokemon) -> None:
         """Update battle-dynamic state (HP, status, boosts, active/fainted)."""

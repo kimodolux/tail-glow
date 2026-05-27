@@ -16,6 +16,9 @@ _SCENARIO_EXAMPLES = """**Setup Opportunity:**
 
 **Endgame Calculation:**
 "Both teams at 2 Pokemon each with hazards up. Their Kingambit has Sucker Punch but nothing else outspeeds us. Our Skeledirge walls it completely. Win condition: keep Skeledirge healthy for Kingambit, sacrifice if needed to chip their Dragonite into revenge kill range."
+
+**Switch Trap (stay-in is correct):**
+"Their Iron Valiant outspeeds and Moonblasts our Garchomp for ~70%. Switch options: Skeledirge takes 55% from Psychic + 12% SR = 67%; Heatran takes 60% from Close Combat + 25% SR = 85%; Toxapex takes 45% Psychic + 12% SR = 57%. Every switch-in eats half its HP and gets KO'd next turn — this is a switch trap. Stay in with Garchomp: Earthquake threatens the OHKO back and forces them out or trades evenly."
 """
 
 
@@ -46,31 +49,46 @@ If your active is "None (must switch)":
 - Consider entry hazard damage
 - Prefer Pokemon that threaten a KO or force them out
 
-**If you have an active Pokemon:**
+**Otherwise, classify the matchup from the damage + speed data. You're in one of four states:**
 
-**If you predict the opponent ATTACKS:**
-- Will their best move KO you? If yes — switch to a resist or priority user.
-- If you can KO them: take the KO (factor in speed).
-- Otherwise: use highest damage move that doesn't lose the matchup.
+**State A — We KO + we outspeed:**
+- Attack. Pick the highest-accuracy KO move (see `% acc` in Available Moves).
+- Base power doesn't matter once a KO is secured. Only pick a less accurate move if it brings a side effect you need (priority, guaranteed flinch, removing a Ground immunity, etc.).
 
-**If you predict the opponent SWITCHES:**
-- Set up (Dragon Dance, Swords Dance, Nasty Plot, etc.) if available and safe.
-- Pivot (U-turn, Volt Switch) if you have a better matchup waiting.
-- Hit the predicted switch-in with super-effective coverage.
-- Set hazards if conditions are right.
+**State B — We KO + they outspeed:**
+- If we survive their hit: attack and trade.
+- If we don't survive: evaluate Switch Cost (below). Sacking is acceptable if our active has no further utility.
+
+**State C — They KO + they outspeed (the danger state):**
+- Evaluate Switch Cost (below).
+- If no switch is safe → consider Tera to flip the matchup, or sack to preserve a win condition. Do NOT switch into a trap.
+
+**State D — Neither side has a KO:**
+- If opponent likely switches: set up (Dragon Dance, Swords Dance, Nasty Plot), pivot (U-turn, Volt Switch), hit the predicted switch-in with super-effective coverage, or set hazards.
+- Otherwise: highest expected-damage move that doesn't open a worse matchup.
 
 **Low-confidence prediction:** play safe. Don't over-commit to a read.
+
+## Switch Cost
+
+Before recommending a switch, evaluate each candidate switch-in:
+
+```
+TOTAL COST = their best move into switch-in (from `their_vs_bench`)
+           + Stealth Rock chip (6% / 12% / 25% by Rock weakness)
+           + Spikes chip (12% / 25% per layer)
+```
+
+A switch is SAFE only if ALL hold:
+- TOTAL COST < 50%, AND
+- Switch-in is not 2HKO'd on the following turn, AND
+- Switch-in threatens back (forces them out, sets up, or scores a KO).
+
+If no switch-in is safe → you're in a switch trap. Stay in and trade, Tera to change the matchup, or sack — whichever preserves the most future value.
 
 ## Status Move Rules
 
 When the effects analysis lists **Decision Rules for Your Moves**, follow them. Status moves (hazards, setup, recovery, pivots, status infliction) should be chosen when their SET IF / USE IF conditions are met — don't default to highest-damage when a status move clearly applies.
-
-## Damage-Based Fallback
-
-When the read is unclear:
-- If you can KO them (≥100% damage) AND outspeed: attack.
-- If they can KO you AND outspeed: switch.
-- If neither has a KO: use highest expected-damage move that doesn't open a worse matchup.
 
 ## Output
 

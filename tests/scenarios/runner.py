@@ -4,6 +4,9 @@ import logging
 import uuid
 
 from poke_env import AccountConfiguration, LocalhostServerConfiguration
+from poke_env.data import GenData
+
+from src.stats import NonRandomResolver, StatsResolver, load_common_spreads
 
 from .graders import GradeResult, make_grader
 from .recording_player import RecordingPlayer
@@ -14,6 +17,7 @@ from .teams import build_team
 logger = logging.getLogger(__name__)
 
 DEFAULT_FORMAT = "gen9customgame"
+DEFAULT_GEN = 9
 
 
 class ScenarioRunner:
@@ -28,6 +32,8 @@ class ScenarioRunner:
         player_name = f"tg-agent-{run_id}"
         opponent_name = f"tg-script-{run_id}"
 
+        resolver_override = _build_resolver_override(scenario)
+
         agent = RecordingPlayer(
             account_configuration=AccountConfiguration(player_name, None),
             server_configuration=LocalhostServerConfiguration,
@@ -35,6 +41,7 @@ class ScenarioRunner:
             team=build_team(scenario.player_team),
             max_concurrent_battles=1,
             start_timer_on_battle_start=False,
+            stats_resolver_override=resolver_override,
         )
 
         opponent = ScriptedPlayer(
@@ -62,3 +69,14 @@ def _extract_battle_won(player) -> bool | None:
         return None
     (battle,) = battles.values()
     return getattr(battle, "won", None)
+
+
+def _build_resolver_override(scenario: Scenario) -> StatsResolver | None:
+    """Build a NonRandomResolver with scenario-specific opponent spreads merged
+    on top of the global smogon-common.json. Returns None when the scenario
+    has no overrides (the default global resolver is used).
+    """
+    if not scenario.opponent_spreads:
+        return None
+    common_db = load_common_spreads().with_overrides(scenario.opponent_spreads)
+    return NonRandomResolver(common_db, GenData.from_gen(DEFAULT_GEN))

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 from src.showdown.client import TailGlowPlayer
+from src.stats import StatsResolver
 
 
 @dataclass
@@ -14,11 +15,23 @@ class DecisionRecord:
 
 
 class RecordingPlayer(TailGlowPlayer):
-    """Wraps TailGlowPlayer to capture each turn's decision for grading."""
+    """Wraps TailGlowPlayer to capture each turn's decision for grading.
 
-    def __init__(self, *args, **kwargs):
+    `stats_resolver_override`, if provided, is injected into AgentState so the
+    agent uses scenario-specific opponent priors (curated spreads + nature
+    + item) instead of the global smogon-common.json defaults.
+    """
+
+    def __init__(self, *args, stats_resolver_override: StatsResolver | None = None, **kwargs):
         super().__init__(*args, **kwargs)
         self.captured_decisions: list[DecisionRecord] = []
+        self._stats_resolver_override = stats_resolver_override
+
+    def _build_battle_state(self, battle, formatted_state: str) -> dict:
+        state = super()._build_battle_state(battle, formatted_state)
+        if self._stats_resolver_override is not None:
+            state["stats_resolver_override"] = self._stats_resolver_override
+        return state
 
     def _battle_finished_callback(self, battle):
         # Skip game-end analysis: scenarios shouldn't pay the extra LLM call

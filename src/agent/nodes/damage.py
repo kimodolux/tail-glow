@@ -24,11 +24,19 @@ def calculate_damage_node(state: AgentState) -> dict:
     try:
         from src.damage_calc import DamageCalculator, format_damage_calculations
         from src.data import get_randbats_data
+        from src.stats import make_resolver
 
         teams_state = state.get("teams_state")
+        randbats_data = get_randbats_data()
+        resolver = (
+            teams_state.stats_resolver
+            if teams_state is not None
+            else make_resolver(Config.BATTLE_FORMAT, randbats_data)
+        )
         calculator = DamageCalculator(
+            stats_resolver=resolver,
             gen=9,
-            randbats_data=get_randbats_data(),
+            randbats_data=randbats_data,
             teams_state=teams_state,
         )
 

@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 from poke_env.battle import Battle, Move, Pokemon, PokemonType
 from poke_env.calc import calculate_damage
 from poke_env.data import GenData
-from poke_env.stats import compute_raw_stats
+
+from src.stats import StatsResolver
 
 
 def _move_matches_tera(move: Move, tera_type: PokemonType) -> bool:
@@ -82,6 +83,7 @@ class DamageCalculator:
 
     def __init__(
         self,
+        stats_resolver: StatsResolver,
         gen: int = 9,
         randbats_data=None,
         teams_state: Optional["TeamsState"] = None,
@@ -90,6 +92,7 @@ class DamageCalculator:
         self.gen_data = GenData.from_gen(gen)
         self.randbats_data = randbats_data
         self.teams_state = teams_state
+        self.stats_resolver = stats_resolver
 
     def calculate_our_moves_vs_active(
         self, battle: Battle
@@ -633,18 +636,16 @@ class DamageCalculator:
         return pokemon.max_hp or 100
 
     def _ensure_pokemon_stats(self, pokemon: Pokemon, battle: Battle) -> None:
-        """Set Pokemon stats and level from cached TeamsState or randbats data.
+        """Set Pokemon stats and level via TeamsState cache or the StatsResolver.
 
-        Uses TeamsState cache when available (preferred), otherwise calculates
-        from randbats data. This ensures consistent stats across turns.
-        Items are handled separately via _calculate_with_variants for opponents.
+        TeamsState cache is preferred so stats are consistent across turns
+        within a battle. When no cache exists, the resolver handles format
+        dispatch (randbats for random formats; curated spreads otherwise).
         """
-        # Try to get cached stats from TeamsState first
-        if self.teams_state:
-            # Determine if this is an opponent Pokemon
-            is_opponent = any(p is pokemon for p in battle.opponent_team.values())
-            cached_state = self.teams_state.get_pokemon_state(pokemon.species, is_opponent)
+        is_opponent = any(p is pokemon for p in battle.opponent_team.values())
 
+        if self.teams_state:
+            cached_state = self.teams_state.get_pokemon_state(pokemon.species, is_opponent)
             if cached_state and cached_state.stats:
                 pokemon._stats = dict(cached_state.stats)
                 pokemon._level = cached_state.level
@@ -654,58 +655,13 @@ class DamageCalculator:
                 # Use _get_actual_max_hp() for damage percentage calculations instead.
                 return
 
-        # Fallback: calculate stats from randbats data
-        species_id = pokemon.species.lower().replace("-", "").replace(" ", "")
-
         try:
-            # Get base stats from pokedex
-            if species_id not in self.gen_data.pokedex:
-                # Try without forme suffix
-                base_species = species_id.split("-")[0] if "-" in pokemon.species else species_id
-                if base_species in self.gen_data.pokedex:
-                    species_id = base_species
-                else:
-                    logger.debug(f"Species {pokemon.species} not found in pokedex")
-                    return
-
-            # Always use randbats data when available
-            if self.randbats_data:
-                randbats_evs = self.randbats_data.get_evs(pokemon.species)
-                randbats_ivs = self.randbats_data.get_ivs(pokemon.species)
-                level = self.randbats_data.get_level(pokemon.species) or pokemon.level or 100
-
-                # Convert dict to list format [HP, Atk, Def, SpA, SpD, Spe]
-                stat_order = ["hp", "atk", "def", "spa", "spd", "spe"]
-                evs = [randbats_evs[s] for s in stat_order]
-                ivs = [randbats_ivs[s] for s in stat_order]
-            else:
-                # Fallback: Random Battles fixed spread estimate
-                level = pokemon.level or 100
-                evs = [85, 85, 85, 85, 85, 85]  # HP, Atk, Def, SpA, SpD, Spe
-                ivs = [31, 31, 31, 31, 31, 31]
-
-            raw_stats = compute_raw_stats(
-                species_id, evs, ivs, level, "hardy", self.gen_data
-            )
-
-            # Set stats and level on pokemon
-            pokemon._stats = {
-                "hp": raw_stats[0],
-                "atk": raw_stats[1],
-                "def": raw_stats[2],
-                "spa": raw_stats[3],
-                "spd": raw_stats[4],
-                "spe": raw_stats[5],
-            }
-            pokemon._level = level
-
-            # Note: We don't modify pokemon._max_hp here because for opponents,
-            # Showdown uses a 0-100 percentage scale for current_hp, and changing
-            # max_hp would break current_hp_fraction calculations.
-            # Use _get_actual_max_hp() for damage percentage calculations instead.
-
+            spread = self.stats_resolver.get_spread(pokemon, is_opponent=is_opponent)
+            if spread.stats:
+                pokemon._stats = dict(spread.stats)
+                pokemon._level = spread.level
         except Exception as e:
-            logger.debug(f"Failed to estimate stats for {pokemon.species}: {e}")
+            logger.debug(f"Failed to resolve stats for {pokemon.species}: {e}")
 
     def _narrow_items(self, state) -> List[str]:
         """Items consistent with the opponent's revealed moves, or full union."""
