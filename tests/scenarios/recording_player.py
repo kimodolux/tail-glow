@@ -20,6 +20,14 @@ class RecordingPlayer(TailGlowPlayer):
         super().__init__(*args, **kwargs)
         self.captured_decisions: list[DecisionRecord] = []
 
+    def _battle_finished_callback(self, battle):
+        # Skip game-end analysis: scenarios shouldn't pay the extra LLM call
+        # or mutate the shared strategy store between runs.
+        self.battles_played += 1
+        if battle.won:
+            self.battles_won += 1
+        self.battle_context.pop(battle.battle_tag, None)
+
     async def choose_move(self, battle):
         order = await super().choose_move(battle)
 

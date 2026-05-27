@@ -47,10 +47,7 @@ class ScenarioRunner:
             start_timer_on_battle_start=False,
         )
 
-        try:
-            await agent.battle_against(opponent, n_battles=1)
-        finally:
-            await agent.wait_for_game_analysis()
+        await agent.battle_against(opponent, n_battles=1)
 
         battle_won = _extract_battle_won(agent)
 
