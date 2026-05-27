@@ -14,6 +14,7 @@ dependencies = [
     "poke-env>=0.9.0",
     "python-dotenv>=1.0.0",
     "chromadb>=0.4.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -39,3 +40,6 @@ line-length = 100
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "scenario: end-to-end agent scenario tests (require local Showdown server + LLM calls)",
+]
