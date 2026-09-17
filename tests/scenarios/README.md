@@ -59,6 +59,20 @@ evaluation:
   expected: [thunderbolt, thunder]   # any match passes
 ```
 
+**`switch_match`** — pass if the agent switches on a given turn and the
+incoming Pokémon's species is in `expected`. Species ids are lowercased
+(see poke-env's `Pokemon.species`).
+
+```yaml
+evaluation:
+  type: switch_match
+  turn: 1
+  expected: [heatran]
+```
+
+Both are backed by `ActionMatchGrader` in `graders.py` — extend that class
+(or add another type to `make_grader`) to cover more action shapes.
+
 More evaluation types (outcome-based, multi-turn, reasoning-judge) are
 planned — see the project plan for the upgrade path.
 

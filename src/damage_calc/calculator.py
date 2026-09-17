@@ -65,6 +65,7 @@ class DamageResult:
     # Optional item/ability context when multiple possibilities exist
     assumed_item: Optional[str] = None
     assumed_ability: Optional[str] = None
+    accuracy: Optional[float] = None  # 0-100; None if unknown
 
 
 @dataclass
@@ -450,6 +451,7 @@ class DamageCalculator:
                 is_estimated=is_estimated,
                 assumed_item=assumed_item,
                 assumed_ability=assumed_ability,
+                accuracy=_normalize_accuracy(getattr(move, "accuracy", None)),
             )
         except Exception as e:
             logger.debug(f"Damage calc failed for {move.id}: {e}")
@@ -579,6 +581,7 @@ class DamageCalculator:
                 is_estimated=results[0].is_estimated,
                 assumed_item=None,  # Clear since all items give same result
                 assumed_ability=None,
+                accuracy=results[0].accuracy,
             )
 
         return results
@@ -870,10 +873,11 @@ def format_damage_calculations(
             if matchup.results:
                 best = max(matchup.results, key=lambda x: x.max_percent)
                 ko_str = f", {best.ko_chance}" if best.ko_chance else ""
+                acc_str = _format_accuracy_suffix(best.accuracy)
                 assumption_str = _format_assumptions(best)
                 lines.append(
                     f"- vs {_format_species(matchup.defender)}: "
-                    f"Best = {_format_move(best.move)} ({best.min_percent}-{best.max_percent}%{ko_str}){assumption_str}"
+                    f"Best = {_format_move(best.move)} ({best.min_percent}-{best.max_percent}%{ko_str}){acc_str}{assumption_str}"
                 )
         lines.append("")
 
@@ -884,10 +888,11 @@ def format_damage_calculations(
             if matchup.results:
                 worst = max(matchup.results, key=lambda x: x.max_percent)
                 est_str = " (est)" if worst.is_estimated else ""
+                acc_str = _format_accuracy_suffix(worst.accuracy)
                 assumption_str = _format_assumptions(worst)
                 lines.append(
                     f"- {_format_species(matchup.defender)} takes: "
-                    f"{_format_move(worst.move)} {worst.min_percent}-{worst.max_percent}%{est_str}{assumption_str}"
+                    f"{_format_move(worst.move)} {worst.min_percent}-{worst.max_percent}%{acc_str}{est_str}{assumption_str}"
                 )
         lines.append("")
 
@@ -907,6 +912,27 @@ def _group_by_move(results: List[DamageResult]) -> Dict[str, List[DamageResult]]
     return grouped
 
 
+def _normalize_accuracy(raw) -> Optional[float]:
+    """Normalize a move.accuracy value to a 0-100 float, or None if unknown."""
+    if raw is True:
+        return 100.0
+    if raw is None or raw is False:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 1:
+        value *= 100
+    return value
+
+
+def _format_accuracy_suffix(accuracy: Optional[float]) -> str:
+    if accuracy is None:
+        return ""
+    return f" ({accuracy:.0f}% acc)"
+
+
 def _format_move_results(
     move: str, results: List[DamageResult], show_estimated: bool = False
 ) -> str:
@@ -914,8 +940,9 @@ def _format_move_results(
     if len(results) == 1:
         r = results[0]
         ko_str = f", {r.ko_chance} KO" if r.ko_chance else ""
+        acc_str = _format_accuracy_suffix(r.accuracy)
         est_str = " (estimated)" if show_estimated and r.is_estimated else ""
-        return f"- {_format_move(move)}: {r.min_percent}-{r.max_percent}%{ko_str}{est_str}"
+        return f"- {_format_move(move)}: {r.min_percent}-{r.max_percent}%{ko_str}{acc_str}{est_str}"
     else:
         # Multiple item/ability variants - show each
         parts = []
@@ -929,8 +956,9 @@ def _format_move_results(
                 assumptions.append(r.assumed_ability)
             assumption_str = f"w/{'+'.join(assumptions)}" if assumptions else ""
             parts.append(f"{r.min_percent}-{r.max_percent}%{ko_str} {assumption_str}".strip())
+        acc_str = _format_accuracy_suffix(results[0].accuracy)
         est_str = " (estimated)" if show_estimated and results[0].is_estimated else ""
-        return f"- {_format_move(move)}: {' | '.join(parts)}{est_str}"
+        return f"- {_format_move(move)}: {' | '.join(parts)}{acc_str}{est_str}"
 
 
 def _format_tera_section(

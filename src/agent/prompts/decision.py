@@ -52,7 +52,7 @@ If your active is "None (must switch)":
 **Otherwise, classify the matchup from the damage + speed data. You're in one of four states:**
 
 **State A — We KO + we outspeed:**
-- Attack. Pick the highest-accuracy KO move (see `% acc` in Available Moves).
+- Attack. First, list every move in the damage section with `guaranteed KO` or `~100% KO`. Then pick the one with the highest `% acc`.
 - Base power doesn't matter once a KO is secured. Only pick a less accurate move if it brings a side effect you need (priority, guaranteed flinch, removing a Ground immunity, etc.).
 
 **State B — We KO + they outspeed:**

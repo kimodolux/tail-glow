@@ -24,24 +24,33 @@ class Grader(Protocol):
     ) -> GradeResult: ...
 
 
-class MoveMatchGrader:
-    """Pass if the agent's action_target on a specific turn matches expected.
+class ActionMatchGrader:
+    """Pass if the agent's action on a specific turn matches the expected
+    type and target.
 
     Config:
         turn: int               # turn to inspect (1-indexed)
-        expected: list[str]     # canonical correct move id(s); any match passes
+        action_type: str        # "move" or "switch"
+        expected: list[str]     # canonical correct move id(s) or species; any match passes
     """
 
     def __init__(self, config: dict[str, Any]):
         self.turn = int(config.get("turn", 1))
+        self.action_type = config["action_type"]
+        if self.action_type not in ("move", "switch"):
+            raise ValueError(
+                f"action_type must be 'move' or 'switch', got {self.action_type!r}"
+            )
         expected = config["expected"]
         if isinstance(expected, str):
+            noun = "move" if self.action_type == "move" else "species"
             raise ValueError(
                 f"'expected' must be a list, got string {expected!r}. "
-                f"Use [{expected!r}] for a single move."
+                f"Use [{expected!r}] for a single {noun}."
             )
         if not expected:
-            raise ValueError("'expected' must contain at least one move id")
+            noun = "move id" if self.action_type == "move" else "species"
+            raise ValueError(f"'expected' must contain at least one {noun}")
         self.expected = list(expected)
 
     def evaluate(self, captures, battle_won=None) -> GradeResult:
@@ -55,11 +64,11 @@ class MoveMatchGrader:
                 ),
             )
 
-        if record.action_type != "move":
+        if record.action_type != self.action_type:
             return GradeResult(
                 passed=False,
                 message=(
-                    f"turn {self.turn}: expected a move, got "
+                    f"turn {self.turn}: expected a {self.action_type}, got "
                     f"{record.action_type}={record.action_target!r}"
                 ),
             )
@@ -69,14 +78,14 @@ class MoveMatchGrader:
         if target_norm in expected_norm:
             return GradeResult(
                 passed=True,
-                message=f"turn {self.turn}: picked {record.action_target!r}",
+                message=f"turn {self.turn}: picked {self.action_type} {record.action_target!r}",
             )
 
         return GradeResult(
             passed=False,
             message=(
-                f"turn {self.turn}: agent picked {record.action_target!r}, "
-                f"expected one of {self.expected}. "
+                f"turn {self.turn}: agent picked {self.action_type} "
+                f"{record.action_target!r}, expected one of {self.expected}. "
                 f"reasoning: {record.reasoning!r}"
             ),
         )
@@ -85,5 +94,7 @@ class MoveMatchGrader:
 def make_grader(evaluation: dict[str, Any]) -> Grader:
     eval_type = evaluation.get("type")
     if eval_type == "move_match":
-        return MoveMatchGrader(evaluation)
+        return ActionMatchGrader({**evaluation, "action_type": "move"})
+    if eval_type == "switch_match":
+        return ActionMatchGrader({**evaluation, "action_type": "switch"})
     raise ValueError(f"unknown evaluation type: {eval_type!r}")
