@@ -1,73 +1,32 @@
-"""State schema for LangGraph agent."""
+"""State schema for the LangGraph battle agent."""
 
 from typing import TypedDict, Optional, Literal, Any
 
-from src.battle import TeamsState, GameMemory
-
 
 class AgentState(TypedDict):
-    """State for LangGraph agent - designed for extensibility."""
+    """State passed through the battle decision graph each turn."""
 
     # Player context
-    username: Optional[str]  # Player username (e.g., TailGlow1, TailGlow2) for Langfuse tracking
+    username: Optional[str]  # Player username (for tracing)
 
     # Battle context
     battle_tag: str  # Unique battle ID
     battle_object: Optional[Any]  # Reference to poke-env Battle
     turn: int  # Current turn number
 
-    # Team state tracking (persists across turns)
-    teams_state: Optional[TeamsState]  # Cached stats and revealed info for both teams
-
-    # Game memory (persists across turns)
-    game_memory: Optional[GameMemory]  # Turn history, opponent patterns, strategic notes
-
     # Formatted state for LLM
     formatted_state: str  # Human-readable game state
 
-    # Tool results (extensible dictionary)
-    tool_results: dict[str, Any]  # All tool outputs
-    # Example: {"damage_calc": {...}, "rag_retrieval": [...]}
-
     # LLM interaction
     llm_response: str  # Raw LLM output
-    reasoning: Optional[str]  # Extracted reasoning for chat
+    reasoning: Optional[str]  # Extracted reasoning for chat / logging
 
     # Parsed decision
     action_type: Optional[Literal["move", "switch"]]
-    action_target: Optional[str]  # Move name or Pokemon slot
+    action_target: Optional[str]  # Move name or Pokemon species
 
     # Error handling
     error: Optional[str]  # Error message if any
 
-    # Langfuse tracing
+    # Tracing
     trace_id: Optional[str]  # Parent trace ID for nesting LLM calls
-
-    # --- Team analysis ---
-    team_analysis: Optional[str]  # LLM analysis of our team roles (Turn 1)
-
-    # --- Battle history ---
-    turn_reasoning: Optional[dict[int, str]]  # {turn: reasoning} from previous turns
-    battle_log_context: Optional[str]  # Formatted battle log for prompts
-
-    # --- Parallel node outputs ---
-    opponent_sets: dict[str, Any]  # Randbats data for opponent Pokemon
-    damage_calculations: Optional[str]  # Formatted damage calc results
-    damage_calc_raw: Optional[dict[str, Any]]  # Raw damage calc data
-    speed_analysis: Optional[str]  # Speed comparison + priority info
-    speed_calc_raw: Optional[dict[str, Any]]  # Raw speed calc data
-    type_matchups: Optional[str]  # Offensive/defensive matchups
-    effects_analysis: Optional[str]  # Relevant item/ability/move effects
-    mechanics_context: Optional[str]  # Per-turn dynamic mechanics chunks (weather, hazards, etc.)
-    strategy_context: Optional[str]  # RAG retrieval results
-
-    # --- Self-learning ---
-    general_strategy: Optional[str]  # Core strategy document content
-    turn_mistakes: Optional[list]  # Mistakes detected on the previous turn
-    accumulated_mistakes: Optional[list]  # All mistakes accumulated during the game
-
-    # --- Test / scenario hooks ---
-    # Pre-built StatsResolver to use instead of the default format-dispatched
-    # one. Scenario tests use this to pin a specific opponent prior per
-    # fixture without mutating the global smogon-common.json.
-    stats_resolver_override: Optional[Any]

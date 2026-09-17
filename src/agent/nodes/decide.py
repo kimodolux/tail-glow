@@ -1,8 +1,7 @@
-"""Decision node - the single per-turn decision LLM call.
+"""Decision node - the per-turn decision LLM call.
 
-Consumes parallel info-gathering outputs (damage, speed, type, effects)
-plus RAG-retrieved learned strategies and produces the final move/switch.
-Opponent prediction is reasoned about inline (no separate LLM call).
+Consumes the formatted battle state plus the available moves/switches and
+produces the final move/switch. Opponent prediction is reasoned about inline.
 """
 
 import logging
@@ -15,52 +14,29 @@ logger = logging.getLogger(__name__)
 
 
 def decide_action_node(state: AgentState) -> AgentState:
-    """Call LLM to decide action based on all gathered battle information."""
+    """Call the LLM to decide an action from the current battle state."""
     battle = state.get("battle_object")
 
     formatted_state = state.get("formatted_state", "Unknown battle state")
-    damage_calculations = state.get("damage_calculations")
-    speed_analysis = state.get("speed_analysis")
-    type_matchups = state.get("type_matchups")
-    effects_analysis = state.get("effects_analysis")
-    mechanics_context = state.get("mechanics_context")
-    team_analysis = state.get("team_analysis")
-    strategy_context = state.get("strategy_context")
-
-    game_memory = state.get("game_memory")
-    game_memory_str = game_memory.format_for_prompt() if game_memory else None
-
     available_moves = _format_available_moves(battle)
     available_switches = _format_available_switches(battle)
 
     user_prompt = build_decision_prompt(
         formatted_state=formatted_state,
-        damage_calculations=damage_calculations,
-        speed_analysis=speed_analysis,
-        type_matchups=type_matchups,
-        effects_analysis=effects_analysis,
-        team_analysis=team_analysis,
         available_moves=available_moves,
         available_switches=available_switches,
-        strategy_context=strategy_context,
-        game_memory=game_memory_str,
-        mechanics_context=mechanics_context,
     )
 
     try:
         llm = get_llm_provider()
-        username = state.get("username")
-        trace_id = state.get("trace_id")
-        turn = state.get("turn")
-        battle_tag = state.get("battle_tag")
         response = llm.generate(
             DECISION_SYSTEM_PROMPT,
             user_prompt,
-            user=username,
-            trace_id=trace_id,
+            user=state.get("username"),
+            trace_id=state.get("trace_id"),
             generation_name="decide_action",
-            turn=turn,
-            battle_tag=battle_tag,
+            turn=state.get("turn"),
+            battle_tag=state.get("battle_tag"),
         )
         state["llm_response"] = response
         logger.debug(f"Decision response: {response}")
@@ -131,7 +107,7 @@ def _format_available_switches(battle) -> str:
 
 
 def _create_fallback_response(battle) -> str:
-    """Create a fallback response when LLM fails."""
+    """Create a fallback response when the LLM fails."""
     if battle and battle.available_moves:
         first_move = battle.available_moves[0].id.replace("-", " ").title()
         return f"REASONING: LLM error fallback.\nACTION: {first_move}"

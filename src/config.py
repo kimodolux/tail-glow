@@ -36,16 +36,6 @@ class Config:
     BATTLE_FORMAT: str = os.getenv("BATTLE_FORMAT", "gen9randombattle")
     MAX_TURNS: int = int(os.getenv("MAX_TURNS", "100"))
 
-    # Feature Flags (for extensibility)
-    ENABLE_DAMAGE_CALC: bool = os.getenv("ENABLE_DAMAGE_CALC", "true").lower() == "true"
-    ENABLE_RAG: bool = os.getenv("ENABLE_RAG", "false").lower() == "true"
-
-    # Randbats Data
-    RANDBATS_DATA_URL: str = os.getenv(
-        "RANDBATS_DATA_URL",
-        "https://pkmn.github.io/randbats/data/{format}.json"
-    )
-
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
 

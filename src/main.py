@@ -5,7 +5,6 @@ import logging
 import argparse
 
 from src.config import Config
-from src.data import init_randbats_data
 from src.showdown.client import run_battles
 
 
@@ -26,25 +25,14 @@ async def main(n_battles: int = 10):
     setup_logging()
     logger = logging.getLogger(__name__)
 
-    logger.info("Starting Tail Glow MVP...")
+    logger.info("Starting Tail Glow...")
 
     # Set config from environment
     try:
         Config.validate()
     except ValueError as e:
         logger.error(f"Configuration error: {e}")
-        return
-
-    # Fetch and cache randbats data
-    logger.info(f"Fetching randbats data for {Config.BATTLE_FORMAT}...")
-    randbats_data = await init_randbats_data(
-        Config.BATTLE_FORMAT,
-        url_template=Config.RANDBATS_DATA_URL,
-    )
-    if randbats_data:
-        logger.info(f"Loaded randbats data for {len(randbats_data)} Pokemon")
-    else:
-        logger.warning("Failed to fetch randbats data")
+        SystemExit(1)
 
     # Run battles
     await run_battles(n_battles=n_battles)
