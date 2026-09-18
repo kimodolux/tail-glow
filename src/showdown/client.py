@@ -30,9 +30,14 @@ class TailGlowPlayer(Player):
         # Quiet the poke-env logger for this player (uses username as logger name)
         logging.getLogger(self.username).setLevel(logging.WARNING)
 
-    async def choose_move(self, battle):
-        """Called by poke-env when it's our turn."""
-        initial_state = {
+    def _build_initial_state(self, battle) -> dict:
+        """Construct the graph's initial state for this turn.
+
+        Factored out of `choose_move` so subclasses (e.g. the scenario
+        RecordingPlayer) can run the graph and capture its result without
+        duplicating the state-construction logic.
+        """
+        return {
             "username": self.username,
             "battle_tag": battle.battle_tag,
             "battle_object": battle,
@@ -44,6 +49,10 @@ class TailGlowPlayer(Player):
             "error": None,
             "trace_id": str(uuid.uuid4()),
         }
+
+    async def choose_move(self, battle):
+        """Called by poke-env when it's our turn."""
+        initial_state = self._build_initial_state(battle)
 
         result = await asyncio.to_thread(self.battle_graph.invoke, initial_state)
 

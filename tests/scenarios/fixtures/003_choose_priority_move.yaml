@@ -1,0 +1,49 @@
+# Lycanrock has a KO with both Smack Down and Accelerock
+# If Lycanrock uses Smack Down, Charizard will outspeed and KO it first
+# Agent should pick Accelerock to outspeed via priority and KO
+name: "Lycanroc doesnt outspeed and KOs Charizard with priority"
+player_team: |
+  Lycanroc @ Life Orb
+  Ability: Steadfast
+  Tera Type: Ghost
+  EVs: 252 Atk / 4 SpD / 252 Spe
+  Brave Nature
+  - Accelerock
+  - Feint Attack
+  - Smack Down
+  - Stealth Rock
+
+opponent_team: |
+  Charizard @ Choice Specs
+  Ability: Solar Power
+  EVs: 4 Def / 252 SpA / 252 Spe
+  Timid Nature
+  - Weather Ball
+  - Solar Beam
+  - Aura Sphere
+  - Flamethrower
+
+opponent_script:
+  - focusblast
+
+# Pin the agent's opponent prior to the actual Charizard set. Without this,
+# Charizard falls back to the role-based heuristic (neutral nature) and the
+# computed Spe is 299 instead of the real 328, which can confuse the speed
+# math the LLM does when reasoning about priority moves.
+opponent_spreads:
+  charizard:
+    spreads:
+      - name: Choice Specs
+        evs: {hp: 0, atk: 0, def: 4, spa: 252, spd: 0, spe: 252}
+        ivs: {hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31}
+        nature: timid
+        level: 100
+        item: choicespecs
+        ability: solarpower
+        moves: [weatherball, solarbeam, aurasphere, flamethrower]
+    default_spread_idx: 0
+
+evaluation:
+  type: move_match
+  turn: 1
+  expected: [accelerock]
