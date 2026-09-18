@@ -51,7 +51,7 @@ OLLAMA_MODEL=llama3.1:8b
 
 # Anthropic settings (if using Claude)
 ANTHROPIC_API_KEY=your_key_here
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
+ANTHROPIC_MODEL=claude-haiku-4-5  # cheapest; use claude-sonnet-4-6 for stronger play
 
 # Showdown settings
 SHOWDOWN_USERNAME=YourBotName
@@ -72,6 +72,32 @@ uv run python -m src.main
 uv run python -m src.main -n 5
 ```
 
+### Run Modes
+
+`src.main` supports three modes via `-m/--mode` (default `ladder`):
+
+| Mode | Flag | What it does |
+|------|------|--------------|
+| Ladder | `-m ladder` | One bot queues on the Showdown ladder against server opponents (default). |
+| Self-play | `-m selfplay` | Two TailGlow bots battle each other. |
+| Bot | `-m bot` | One TailGlow bot battles a poke-env baseline bot. |
+
+In `bot` mode, `-o/--opponent` selects the baseline: `random`, `maxpower`
+(`MaxBasePowerPlayer`), or `heuristic` (`SimpleHeuristicsPlayer`).
+
+```bash
+# Self-play: two TailGlow bots fight (5 battles)
+uv run python -m src.main -m selfplay -n 5
+
+# Bot: fight the SimpleHeuristics baseline
+uv run python -m src.main -m bot -o heuristic -n 5
+```
+
+> **Note:** `selfplay` and `bot` have the two accounts challenge each other
+> directly, which the public `psim.us` server generally rejects — run these
+> against a local server (set `SHOWDOWN_SERVER=localhost:8000`; see below).
+> `ladder` works fine on the official server.
+
 ## Local Testing (Bot vs Bot)
 
 Run two bots against each other on a local Pokemon Showdown server:
@@ -83,10 +109,18 @@ docker compose up -d --build
 
 # 2. Wait a few seconds for server to start, then run battles
 cd ..
+
+# Two TailGlow bots against each other:
+uv run python -m src.main -m selfplay -n 5
+
+# Or TailGlow against a poke-env baseline bot:
+uv run python -m src.main -m bot -o maxpower -n 5
+
+# (Equivalent legacy script for self-play):
 uv run python scripts/local_battle.py -n 5
 ```
 
-This creates two TailGlow bots that battle each other locally. You can watch battles live at http://localhost:8000.
+This runs bots against each other locally. You can watch battles live at http://localhost:8000.
 
 To stop the server:
 ```bash

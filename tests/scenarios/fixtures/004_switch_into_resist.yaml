@@ -1,0 +1,80 @@
+# Garchomp is 4x weak to Ice and outsped by Weavile.
+# Weavile is a fast physical attacker — predict_opponent should flag
+# Icicle Crash / Ice Shard as the high-probability move, which OHKOs Garchomp.
+# Heatran is a Steel-type Ice resist that walls the predicted attack.
+# Agent should switch Garchomp -> Heatran instead of attacking.
+name: "Switch Garchomp out into Heatran vs Weavile's predicted Icicle Crash"
+player_team: |
+  Garchomp @ Life Orb
+  Ability: Rough Skin
+  Tera Type: Steel
+  EVs: 252 Atk / 4 SpD / 252 Spe
+  Jolly Nature
+  - Earthquake
+  - Dragon Claw
+  - Stone Edge
+  - Swords Dance
+
+  Heatran @ Leftovers
+  Ability: Flash Fire
+  Tera Type: Grass
+  EVs: 252 HP / 4 SpA / 252 SpD
+  Calm Nature
+  - Magma Storm
+  - Earth Power
+  - Taunt
+  - Stealth Rock
+
+  Clefable @ Life Orb
+  Ability: Magic Guard
+  Tera Type: Steel
+  EVs: 252 HP / 252 Def / 4 SpD
+  Bold Nature
+  - Moonblast
+  - Thunder Wave
+  - Soft-Boiled
+  - Stealth Rock
+
+opponent_team: |
+  Weavile @ Choice Band
+  Ability: Pickpocket
+  Tera Type: Dark
+  EVs: 252 Atk / 4 SpD / 252 Spe
+  Jolly Nature
+  - Icicle Crash
+  - Triple Axel
+  - Knock Off
+  - Ice Shard
+
+  Tyranitar @ Choice Scarf
+  Ability: Sand Stream
+  EVs: 4 HP / 252 Atk / 252 Spe
+  Jolly Nature
+  - Stone Edge
+  - Crunch
+  - Earthquake
+  - Ice Punch
+
+opponent_script:
+  - iciclecrash
+
+# Pin Weavile's prior so the agent reasons against the actual Choice Band /
+# Jolly set rather than the role-based default. Without this the speed and
+# damage math the agent runs may not match what actually happens on the server.
+opponent_spreads:
+  weavile:
+    spreads:
+      - name: Choice Band
+        evs: {hp: 0, atk: 252, def: 0, spa: 0, spd: 4, spe: 252}
+        ivs: {hp: 31, atk: 31, def: 31, spa: 31, spd: 31, spe: 31}
+        nature: jolly
+        level: 100
+        item: choiceband
+        ability: pickpocket
+        moves: [iciclecrash, tripleaxel, knockoff, iceshard]
+    default_spread_idx: 0
+
+evaluation:
+  type: switch_match
+  turn: 1
+  expected: [heatran]
