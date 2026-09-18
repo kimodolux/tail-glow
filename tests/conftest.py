@@ -63,19 +63,3 @@ def mock_battle(mock_pokemon, mock_opponent_pokemon, mock_move):
     battle.side_conditions = []
     battle.opponent_side_conditions = []
     return battle
-
-
-@pytest.fixture
-def sample_agent_state():
-    """Create a sample AgentState for testing."""
-    return {
-        "battle_tag": "battle-gen9randombattle-12345",
-        "battle_object": None,
-        "turn": 5,
-        "formatted_state": "# Turn 5\n\n## Active Pokemon\n...",
-        "tool_results": {},
-        "llm_response": "",
-        "action_type": None,
-        "action_target": None,
-        "error": None,
-    }

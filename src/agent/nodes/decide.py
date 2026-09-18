@@ -1,10 +1,14 @@
 """Decision node - the per-turn decision LLM call.
 
-Consumes the formatted battle state plus the available moves/switches and
-produces the final move/switch. Opponent prediction is reasoned about inline.
+Consumes the formatted battle state (which already includes the available
+moves and switches) and produces a structured decision. Opponent prediction
+is reasoned about inline in the `reasoning` field.
 """
 
 import logging
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 from ..state import AgentState
 from ..prompts import DECISION_SYSTEM_PROMPT, build_decision_prompt
@@ -13,106 +17,59 @@ from src.llm import get_llm_provider
 logger = logging.getLogger(__name__)
 
 
-def decide_action_node(state: AgentState) -> AgentState:
-    """Call the LLM to decide an action from the current battle state."""
-    battle = state.get("battle_object")
+class Decision(BaseModel):
+    """The structured action the LLM commits to for this turn."""
 
-    formatted_state = state.get("formatted_state", "Unknown battle state")
-    available_moves = _format_available_moves(battle)
-    available_switches = _format_available_switches(battle)
-
-    user_prompt = build_decision_prompt(
-        formatted_state=formatted_state,
-        available_moves=available_moves,
-        available_switches=available_switches,
+    reasoning: str = Field(
+        description="1-2 sentences: the opponent read and why this action was chosen."
     )
+    action_type: Literal["move", "switch"] = Field(
+        description="Whether to use a move or switch to another Pokemon."
+    )
+    action_target: str = Field(
+        description="The move name (if action_type is 'move') or the species to "
+        "switch to (if action_type is 'switch')."
+    )
+
+
+def decide_action_node(state: AgentState) -> AgentState:
+    """Call the LLM to decide a structured action from the current battle state."""
+    battle = state.get("battle_object")
+    user_prompt = build_decision_prompt(state.get("formatted_state", "Unknown battle state"))
 
     try:
         llm = get_llm_provider()
-        response = llm.generate(
+        decision = llm.generate_structured(
             DECISION_SYSTEM_PROMPT,
             user_prompt,
+            Decision,
             user=state.get("username"),
             trace_id=state.get("trace_id"),
             generation_name="decide_action",
             turn=state.get("turn"),
             battle_tag=state.get("battle_tag"),
         )
-        state["llm_response"] = response
-        logger.debug(f"Decision response: {response}")
+        state["reasoning"] = decision.reasoning
+        state["action_type"] = decision.action_type
+        state["action_target"] = decision.action_target
+        logger.debug(f"Decision: {decision!r}")
     except Exception as e:
         logger.error(f"Decision LLM error: {e}")
         state["error"] = f"Decision error: {e}"
-        state["llm_response"] = _create_fallback_response(battle)
+        _apply_fallback(state, battle)
 
     return state
 
 
-def _format_available_moves(battle) -> str:
-    """Format available moves for the decision prompt."""
-    if not battle or not battle.available_moves:
-        return "None available"
-
-    lines = []
-    for move in battle.available_moves:
-        move_name = move.id.replace("-", " ").title()
-        move_type = move.type.name if move.type else "???"
-        base_power = move.base_power if move.base_power else "—"
-        accuracy = _format_accuracy(move.accuracy)
-
-        # Pseudo-moves like "recharge" / "struggle" lack a priority key in
-        # poke-env's data; treat missing as 0 rather than crashing the turn.
-        priority = move.entry.get("priority", 0)
-        priority_str = f" [Priority +{priority}]" if priority > 0 else ""
-        priority_str = f" [Priority {priority}]" if priority < 0 else priority_str
-
-        lines.append(f"- {move_name} ({move_type}, {base_power} BP, {accuracy} acc){priority_str}")
-
-    return "\n".join(lines) if lines else "None available"
-
-
-def _format_accuracy(accuracy) -> str:
-    """Format poke-env move accuracy for prompts."""
-    if accuracy is True:
-        return "—"
-    if not accuracy:
-        return "—"
-
-    try:
-        accuracy_value = float(accuracy)
-    except (TypeError, ValueError):
-        return str(accuracy)
-
-    if accuracy_value <= 1:
-        accuracy_value *= 100
-
-    return f"{accuracy_value:.0f}%"
-
-
-def _format_available_switches(battle) -> str:
-    """Format available switches for the decision prompt."""
-    if not battle or not battle.available_switches:
-        return "None available"
-
-    lines = []
-    for pokemon in battle.available_switches:
-        species = pokemon.species
-        types = "/".join(t.name for t in pokemon.types if t)
-        hp_pct = f"{pokemon.current_hp_fraction * 100:.0f}%" if pokemon.current_hp_fraction else "???"
-        status = f" [{pokemon.status.name}]" if pokemon.status else ""
-
-        lines.append(f"- {species} ({types}, {hp_pct} HP){status}")
-
-    return "\n".join(lines) if lines else "None available"
-
-
-def _create_fallback_response(battle) -> str:
-    """Create a fallback response when the LLM fails."""
+def _apply_fallback(state: AgentState, battle) -> None:
+    """Pick a sane default action directly when the LLM decision fails."""
+    state["reasoning"] = "LLM error fallback."
     if battle and battle.available_moves:
-        first_move = battle.available_moves[0].id.replace("-", " ").title()
-        return f"REASONING: LLM error fallback.\nACTION: {first_move}"
+        state["action_type"] = "move"
+        state["action_target"] = battle.available_moves[0].id
     elif battle and battle.available_switches:
-        first_switch = battle.available_switches[0].species
-        return f"REASONING: LLM error fallback.\nACTION: Switch to {first_switch}"
+        state["action_type"] = "switch"
+        state["action_target"] = battle.available_switches[0].species
     else:
-        return "REASONING: No options available.\nACTION: Struggle"
+        state["action_type"] = "move"
+        state["action_target"] = None

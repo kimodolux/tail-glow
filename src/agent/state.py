@@ -17,9 +17,8 @@ class AgentState(TypedDict):
     # Formatted state for LLM
     formatted_state: str  # Human-readable game state
 
-    # LLM interaction
-    llm_response: str  # Raw LLM output
-    reasoning: Optional[str]  # Extracted reasoning for chat / logging
+    # Decision output
+    reasoning: Optional[str]  # The LLM's reasoning for the chosen action
 
     # Parsed decision
     action_type: Optional[Literal["move", "switch"]]

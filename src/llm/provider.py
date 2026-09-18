@@ -8,8 +8,12 @@ from collections import deque
 
 import litellm
 from litellm import completion
+from pydantic import BaseModel
+from typing import TypeVar
 
 from src.config import Config
+
+T = TypeVar("T", bound=BaseModel)
 
 logger = logging.getLogger(__name__)
 
@@ -122,17 +126,60 @@ class LLMProvider:
         turn: int | None = None,
         battle_tag: str | None = None,
     ) -> str:
-        """Generate response from LLM.
+        """Generate a free-text response from the LLM."""
+        return self._complete(
+            system_prompt,
+            user_prompt,
+            response_format=None,
+            user=user,
+            trace_id=trace_id,
+            generation_name=generation_name,
+            turn=turn,
+            battle_tag=battle_tag,
+        )
 
-        Args:
-            system_prompt: The system prompt for the LLM
-            user_prompt: The user prompt for the LLM
-            user: Optional user identifier for Langfuse tracking (e.g., TailGlow1, TailGlow2)
-            trace_id: Optional parent trace ID for nesting this call under a Langfuse trace
-            generation_name: Optional name for this generation in Langfuse (e.g., "team_analysis", "decide_action")
-            turn: Optional turn number for Langfuse tagging
-            battle_tag: Optional battle tag for Langfuse session tracking
+    def generate_structured(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        response_model: type[T],
+        user: str | None = None,
+        trace_id: str | None = None,
+        generation_name: str | None = None,
+        turn: int | None = None,
+        battle_tag: str | None = None,
+    ) -> T:
+        """Generate a structured response validated against a Pydantic model.
+
+        LiteLLM maps ``response_format`` onto each provider's native structured
+        output mechanism (tool use for Anthropic, JSON mode for Ollama), so the
+        returned content is JSON matching ``response_model``'s schema.
         """
+        content = self._complete(
+            system_prompt,
+            user_prompt,
+            response_format=response_model,
+            user=user,
+            trace_id=trace_id,
+            generation_name=generation_name,
+            turn=turn,
+            battle_tag=battle_tag,
+        )
+        return response_model.model_validate_json(content)
+
+    def _complete(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        *,
+        response_format: type[BaseModel] | None,
+        user: str | None,
+        trace_id: str | None,
+        generation_name: str | None,
+        turn: int | None,
+        battle_tag: str | None,
+    ) -> str:
+        """Shared completion path: tracing metadata, rate limiting, retries."""
         logger.debug(f"Calling LiteLLM model: {self.model}")
 
         # Build metadata for Langfuse tracing
@@ -173,6 +220,7 @@ class LLMProvider:
                     model=self.model,
                     messages=messages,
                     max_tokens=512,
+                    response_format=response_format,
                     success_callback=self.callbacks,
                     failure_callback=self.callbacks,
                     metadata=metadata if metadata else None,

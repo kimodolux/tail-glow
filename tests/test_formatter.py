@@ -1,7 +1,7 @@
 """Tests for battle state formatter."""
 
 import pytest
-from src.showdown.formatter import format_battle_state, _format_pokemon, _format_move
+from src.agent.nodes.format_state import format_battle_state, _format_pokemon, _format_move
 
 
 class TestFormatPokemon:
@@ -81,8 +81,3 @@ class TestFormatBattleState:
         """Test that formatted state includes field conditions section."""
         result = format_battle_state(mock_battle)
         assert "Field Conditions" in result
-
-    def test_format_ends_with_prompt(self, mock_battle):
-        """Test that formatted state ends with action prompt."""
-        result = format_battle_state(mock_battle)
-        assert "What should you do?" in result
