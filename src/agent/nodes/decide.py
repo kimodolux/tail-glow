@@ -35,7 +35,11 @@ class Decision(BaseModel):
 def decide_action_node(state: AgentState) -> AgentState:
     """Call the LLM to decide a structured action from the current battle state."""
     battle = state.get("battle_object")
-    user_prompt = build_decision_prompt(state.get("formatted_state", "Unknown battle state"))
+    user_prompt = build_decision_prompt(
+        state.get("formatted_state", "Unknown battle state"),
+        state.get("damage_report") or "",
+        state.get("opponent_summary") or "",
+    )
 
     try:
         llm = get_llm_provider()

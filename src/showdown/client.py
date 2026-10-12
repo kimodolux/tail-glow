@@ -18,6 +18,7 @@ from langgraph.graph.state import CompiledStateGraph
 
 from src.config import Config
 from src.agent import create_agent
+from src.agent.belief import BattleBelief
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,19 @@ class TailGlowPlayer(Player):
         super().__init__(*args, **kwargs)
         self.battle_graph: CompiledStateGraph = create_agent()
 
+        # Mechanical opponent belief, one per battle, persisted across turns.
+        self._beliefs: dict[str, BattleBelief] = {}
+
         # Quiet the poke-env logger for this player (uses username as logger name)
         logging.getLogger(self.username).setLevel(logging.WARNING)
+
+    def _get_belief(self, battle) -> BattleBelief:
+        """Get-or-create the persistent belief for a battle."""
+        belief = self._beliefs.get(battle.battle_tag)
+        if belief is None:
+            belief = BattleBelief(format_id=battle.format)
+            self._beliefs[battle.battle_tag] = belief
+        return belief
 
     def _build_initial_state(self, battle) -> dict:
         """Construct the graph's initial state for this turn.
@@ -42,7 +54,10 @@ class TailGlowPlayer(Player):
             "battle_tag": battle.battle_tag,
             "battle_object": battle,
             "turn": battle.turn,
+            "opponent_belief": self._get_belief(battle),
+            "opponent_summary": None,
             "formatted_state": "",
+            "damage_report": None,
             "reasoning": None,
             "action_type": None,
             "action_target": None,

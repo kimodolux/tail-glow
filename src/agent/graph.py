@@ -1,7 +1,7 @@
 """LangGraph agent for Pokemon battle decisions.
 
 Flow (every turn):
-    format_state -> decide_action [LLM]
+    format_state -> resolve_opponent -> damage_calc -> decide_action [LLM]
 """
 
 import logging
@@ -12,6 +12,8 @@ from langgraph.graph.state import CompiledStateGraph
 from .state import AgentState
 from .nodes import (
     format_state_node,
+    resolve_opponent_node,
+    damage_calc_node,
     decide_action_node,
 )
 
@@ -22,16 +24,22 @@ def create_battle_graph() -> CompiledStateGraph:
     """Build the battle decision graph (runs every turn).
 
     Flow:
-    1. format_state  - Turn the battle object into LLM-readable text
-    2. decide_action - Make the structured move/switch decision [LLM]
+    1. format_state     - Turn the battle object into LLM-readable text
+    2. resolve_opponent - Narrow the mechanical belief over opponent sets
+    3. damage_calc      - Attach deterministic damage estimates for this turn
+    4. decide_action    - Make the structured move/switch decision [LLM]
     """
     workflow = StateGraph(AgentState)
 
     workflow.add_node("format_state", format_state_node)
+    workflow.add_node("resolve_opponent", resolve_opponent_node)
+    workflow.add_node("damage_calc", damage_calc_node)
     workflow.add_node("decide_action", decide_action_node)
 
     workflow.add_edge(START, "format_state")
-    workflow.add_edge("format_state", "decide_action")
+    workflow.add_edge("format_state", "resolve_opponent")
+    workflow.add_edge("resolve_opponent", "damage_calc")
+    workflow.add_edge("damage_calc", "decide_action")
     workflow.add_edge("decide_action", END)
 
     return workflow.compile()

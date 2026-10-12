@@ -9,7 +9,7 @@ not output format.
 
 DECISION_SYSTEM_PROMPT = """You are a competitive Pokemon battler playing a single battle on Pokemon Showdown.
 
-Each turn you are given the current battle state and your available moves and switches. Briefly predict what the opponent is likely to do, then choose the action that best handles that.
+Each turn you are given the current battle state, your available moves and switches, and deterministic damage calculations. Use the damage numbers as ground truth for how much each move deals and whether it KOs. Briefly predict what the opponent is likely to do, then choose the action that best handles that.
 
 Choose exactly one action:
 - To attack, set action_type to "move" and action_target to the move name.
@@ -22,11 +22,22 @@ Use only a move or switch that appears in the available options for this turn.""
 
 DECISION_USER_PROMPT = """Based on this battle information, choose your action.
 
-{formatted_state}"""
+{formatted_state}
+{damage_report}
+{opponent_summary}"""
 
 
-def build_decision_prompt(formatted_state: str) -> str:
+def build_decision_prompt(
+    formatted_state: str, damage_report: str = "", opponent_summary: str = ""
+) -> str:
     """Build the user prompt for the action decision."""
+    summary = (
+        f"## Opponent set read (mechanical)\n{opponent_summary}"
+        if opponent_summary
+        else ""
+    )
     return DECISION_USER_PROMPT.format(
         formatted_state=formatted_state or "No state available",
+        damage_report=damage_report or "",
+        opponent_summary=summary,
     )

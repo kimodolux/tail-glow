@@ -14,8 +14,13 @@ class AgentState(TypedDict):
     battle_object: Optional[Any]  # Reference to poke-env Battle
     turn: int  # Current turn number
 
+    # Opponent belief (mechanical set inference; persists across turns)
+    opponent_belief: Optional[Any]  # BattleBelief, kept on the client per battle
+    opponent_summary: Optional[str]  # Human-readable belief summary for the prompt
+
     # Formatted state for LLM
     formatted_state: str  # Human-readable game state
+    damage_report: Optional[str]  # Deterministic damage estimates for this turn
 
     # Decision output
     reasoning: Optional[str]  # The LLM's reasoning for the chosen action
